@@ -1,0 +1,17 @@
+<Ui xmlns="http://www.blizzard.com/wow/ui/">
+    <!-- Inline text-input row for the Settings vertical list, matching the built-in checkbox/slider/dropdown row style. -->
+    <Frame name="SabotonTextInputControlTemplate" inherits="SettingsListElementTemplate" mixin="SabotonTextInputControlMixin" virtual="true">
+        <Size x="280" y="26"/>
+        <Frames>
+            <EditBox parentKey="EditBox" inherits="InputBoxTemplate" letters="256" autoFocus="false">
+                <Size x="190" y="20"/>
+                <Anchors>
+                    <Anchor point="LEFT" relativePoint="CENTER" x="-80" y="0"/>
+                </Anchors>
+            </EditBox>
+        </Frames>
+        <Scripts>
+            <OnLoad method="OnLoad"/>
+        </Scripts>
+    </Frame>
+</Ui>

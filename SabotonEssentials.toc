@@ -1,0 +1,15 @@
+## Interface: 16001
+## Title: Saboton Essentials
+## Notes: Plays a squeaky-toy sound when a Mage in your group or raid dies.
+## Author: nikok
+## Version: 0.1.0-alpha.1
+## DefaultState: enabled
+## IconTexture: Interface\Icons\Spell_Frost_FrostNova
+
+src\Core.lua
+src\Modules\SqueakyToy.lua
+src\Modules\ExtraAttack.lua
+src\Modules\GatheringTimer.lua
+src\Modules\MinimapButton.lua
+src\Options.xml
+src\Options.lua
