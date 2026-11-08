@@ -5,6 +5,14 @@ local SqueakyToy = {}
 
 local DEBUG = false
 
+function SqueakyToy:GetPersistentState()
+    return { debug = DEBUG }
+end
+
+function SqueakyToy:LoadPersistentState(state)
+    if type(state) == "table" and type(state.debug) == "boolean" then DEBUG = state.debug end
+end
+
 -- Sound choices selectable from the options dropdown; "key" is what options.soundKey stores.
 local SOUND_OPTIONS = {
     { key = "none", label = "No sound", silent = true },
@@ -61,8 +69,13 @@ local MAX_NAMEPLATES = 40
 local MAX_BOSS_UNITS = 5
 local MAX_ARENA_UNITS = 5
 
+local function matchesGUID(unit, guid)
+    local unitGUID = UnitGUID(unit)
+    return not issecretvalue(unitGUID) and unitGUID == guid
+end
+
 local function findGroupUnitByGUID(guid)
-    if UnitGUID("player") == guid then
+    if matchesGUID("player", guid) then
         return "player"
     end
 
@@ -72,7 +85,7 @@ local function findGroupUnitByGUID(guid)
 
     for index = 1, unitCount do
         local unit = unitPrefix .. index
-        if UnitGUID(unit) == guid then
+        if matchesGUID(unit, guid) then
             return unit
         end
     end
@@ -89,28 +102,28 @@ local function findAnyUnitByGUID(guid)
     end
 
     for _, unit in ipairs(SCAN_UNIT_TOKENS) do
-        if UnitGUID(unit) == guid then
+        if matchesGUID(unit, guid) then
             return unit
         end
     end
 
     for index = 1, MAX_NAMEPLATES do
         local unit = "nameplate" .. index
-        if UnitGUID(unit) == guid then
+        if matchesGUID(unit, guid) then
             return unit
         end
     end
 
     for index = 1, MAX_BOSS_UNITS do
         local unit = "boss" .. index
-        if UnitGUID(unit) == guid then
+        if matchesGUID(unit, guid) then
             return unit
         end
     end
 
     for index = 1, MAX_ARENA_UNITS do
         local unit = "arena" .. index
-        if UnitGUID(unit) == guid then
+        if matchesGUID(unit, guid) then
             return unit
         end
     end
@@ -120,7 +133,7 @@ end
 
 local function isTriggerClass(unit)
     local className = select(2, UnitClass(unit))
-    return className == options.triggerClass
+    return not issecretvalue(className) and className == options.triggerClass
 end
 
 local function playSqueak()
@@ -135,14 +148,7 @@ local function playSqueak()
 end
 
 local function handleUnitDied(unitGUID)
-    if not unitGUID then
-        return
-    end
-
-    -- Patch 12.0 "Secret Values": GUIDs for units that aren't player-controlled or in the
-    -- party/raid are secret and cannot be compared with ==. Such a GUID can never match a
-    -- group member's GUID anyway, so it's safe to bail out before any comparison happens.
-    if issecretvalue(unitGUID) then
+    if issecretvalue(unitGUID) or not unitGUID then
         return
     end
 
@@ -164,6 +170,7 @@ local function handleUnitDied(unitGUID)
         end
 
         local isFriendly = UnitIsFriend("player", unit)
+        if issecretvalue(isFriendly) then return end
         if (options.anyHostileDeath and not isFriendly) or (options.anyFriendlyDeath and isFriendly) then
             if DEBUG then
                 addon.Print("Unit death detected: " .. (UnitName(unit) or "unknown"))

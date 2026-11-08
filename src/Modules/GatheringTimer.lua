@@ -51,6 +51,7 @@ local GATHERABLES = {
     { itemID = 13465, name = "Mountain Silversage", kind = "herb", enabled = false },
     { itemID = 13468, name = "Black Lotus",         kind = "herb", enabled = true },
 }
+local BUILTIN_COUNT = #GATHERABLES
 
 local minSoundKey = "ding"
 local maxSoundKey = "thud"
@@ -58,7 +59,10 @@ local minTimerEnabled = true
 local maxTimerEnabled = true
 local minDuration = DEFAULT_MIN
 local maxDuration = DEFAULT_MAX
+local minDurationOverride = false
+local maxDurationOverride = false
 local active = nil
+local savedPosition = nil
 
 local function secret(v) return issecretvalue and issecretvalue(v) end
 
@@ -157,8 +161,8 @@ local function layoutFrame()
     if not f then return end
     local vertical = orientation == "VERTICAL"
     -- A bar shows only while its timer is enabled and has not completed.
-    local minShown = minTimerEnabled and active ~= nil and not active.minFired
-    local maxShown = maxTimerEnabled and active ~= nil and not active.maxFired
+    local minShown = minTimerEnabled and active ~= nil and active.minSeconds > 0 and (not active.minFired or GetTime() < active.minFlashUntil)
+    local maxShown = maxTimerEnabled and active ~= nil and active.maxSeconds > 0 and (not active.maxFired or GetTime() < active.maxFlashUntil)
     local n = (minShown and 1 or 0) + (maxShown and 1 or 0)
     local w = vertical and barHeight or barWidth
     local h = vertical and barWidth or barHeight
@@ -182,6 +186,8 @@ local function layoutFrame()
     f:SetSize((n > 0) and w or 1, (n > 0) and (y - 16) or 1)
     f.minBar:SetShown(minShown)
     f.maxBar:SetShown(maxShown)
+    f.minBar.title:SetShown(minShown)
+    f.maxBar.title:SetShown(maxShown)
     f:SetShown(n > 0)
 end
 
@@ -191,6 +197,8 @@ local function updateBars()
     if not active then
         f.minBar:SetShown(false)
         f.maxBar:SetShown(false)
+        f.minBar.title:SetShown(false)
+        f.maxBar.title:SetShown(false)
         f:SetShown(false)
         return
     end
@@ -200,8 +208,8 @@ local function updateBars()
         local frac = duration > 0 and math.min(elapsed / duration, 1) or 1
         holder.bar:SetValue(frac)
         holder.bar:SetStatusBarColor(0.2, 0.6, 1)
-        local remaining = math.max(duration - elapsed, 0)
-        holder.text:SetText(active.entryName .. " " .. string.format("%d:%02d", remaining / 60, remaining % 60))
+        local remaining = math.ceil(math.max(duration - elapsed, 0))
+        holder.text:SetText(active.entryName .. " " .. string.format("%d:%02d", math.floor(remaining / 60), remaining % 60))
     end
     update(f.minBar, active.minSeconds, active.minFired)
     update(f.maxBar, active.maxSeconds, active.maxFired)
@@ -212,15 +220,18 @@ local function stopTimers()
     updateBars()
 end
 
-local function startTimers(entry)
+local function startTimers(entry, testMode)
     active = {
         entryName = entry.name,
         -- The global sliders override per-entry values; 0 disables that bar entirely.
-        minSeconds = (minDuration ~= DEFAULT_MIN) and minDuration or (entry.minSeconds or DEFAULT_MIN),
-        maxSeconds = (maxDuration ~= DEFAULT_MAX) and maxDuration or (entry.maxSeconds or DEFAULT_MAX),
+        minSeconds = not testMode and minDurationOverride and minDuration or (entry.minSeconds or DEFAULT_MIN),
+        maxSeconds = not testMode and maxDurationOverride and maxDuration or (entry.maxSeconds or DEFAULT_MAX),
         startedAt = GetTime(),
         minFired = false,
         maxFired = false,
+        minFlashUntil = 0,
+        maxFlashUntil = 0,
+        finishToken = nil,
     }
     local f = GatheringTimer.frame
     if f then
@@ -236,25 +247,29 @@ local function onTick()
     if not active then return end
     local elapsed = GetTime() - active.startedAt
     local f = GatheringTimer.frame
-    if minTimerEnabled and not active.minFired and elapsed >= active.minSeconds then
+    if minTimerEnabled and active.minSeconds > 0 and not active.minFired and elapsed >= active.minSeconds then
         active.minFired = true
+        active.minFlashUntil = GetTime() + FLASH_SECONDS
         playSound(minSoundKey)
         if f then flashBar(f.minBar) end
         if DEBUG then addon.Print(active.entryName .. " min reached - node may be up.") end
     end
-    if maxTimerEnabled and not active.maxFired and elapsed >= active.maxSeconds then
+    if maxTimerEnabled and active.maxSeconds > 0 and not active.maxFired and elapsed >= active.maxSeconds then
         active.maxFired = true
+        active.maxFlashUntil = GetTime() + FLASH_SECONDS
         playSound(maxSoundKey)
         if f then flashBar(f.maxBar) end
         if DEBUG then addon.Print(active.entryName .. " max reached - node gone or taken.") end
     end
     -- Once every enabled timer has completed, the run is over: flash fades, then clear.
-    local minDone = not minTimerEnabled or active.minFired
-    local maxDone = not maxTimerEnabled or active.maxFired
-    if minDone and maxDone then
+    local minDone = not minTimerEnabled or active.minSeconds <= 0 or active.minFired
+    local maxDone = not maxTimerEnabled or active.maxSeconds <= 0 or active.maxFired
+    if minDone and maxDone and not active.finishToken then
         local finished = active
+        local token = {}
+        active.finishToken = token
         C_Timer.After(FLASH_SECONDS, function()
-            if active == finished then stopTimers() end
+            if active == finished and active.finishToken == token then stopTimers() end
         end)
     end
     layoutFrame()
@@ -279,9 +294,9 @@ local function captureLoot()
         local name = GetLootSlotInfo and (select(2, GetLootSlotInfo(slot))) or nil
         if secret(name) then name = nil end
         local entry = findEntry(itemID, name)
-        if entry then
+        if entry and entry.enabled then
             if DEBUG then addon.Print(string.format("Looted tracked %s: %s (id %s)", entry.kind, entry.name, tostring(itemID))) end
-            if entry.enabled then startTimers(entry) elseif DEBUG then addon.Print(entry.name .. " is disabled; no timer.") end
+            startTimers(entry)
             return
         end
     end
@@ -303,19 +318,19 @@ function GatheringTimer:GetOptionsSchema()
         { type = "checkbox", key = "minTimer", label = "Show 'may be up' timer (min)",
           tooltip = "Bar that completes when the node may have respawned.",
           default = true, get = function() return minTimerEnabled end,
-          set = function(v) minTimerEnabled = v layoutFrame() updateBars() end },
+          set = function(v) minTimerEnabled = v if active then active.finishToken = nil end layoutFrame() updateBars() end },
         { type = "slider", key = "minDuration", label = "'May be up' duration", min = 0, max = 900, step = 5,
           tooltip = "Seconds until the node may have respawned. 0 disables this bar.",
           default = DEFAULT_MIN, format = "%ds", get = function() return minDuration end,
-          set = function(v) minDuration = v if active then active.minSeconds = v updateBars() end end },
+          set = function(v) minDuration = v minDurationOverride = true if active then active.minSeconds = v active.finishToken = nil layoutFrame() updateBars() end end },
         { type = "checkbox", key = "maxTimer", label = "Show 'gone / taken' timer (max)",
           tooltip = "Bar that completes when the node is gone or was taken.",
           default = true, get = function() return maxTimerEnabled end,
-          set = function(v) maxTimerEnabled = v layoutFrame() updateBars() end },
+          set = function(v) maxTimerEnabled = v if active then active.finishToken = nil end layoutFrame() updateBars() end },
         { type = "slider", key = "maxDuration", label = "'Gone / taken' duration", min = 0, max = 900, step = 5,
           tooltip = "Seconds until the node is gone or was taken. 0 disables this bar.",
           default = DEFAULT_MAX, format = "%ds", get = function() return maxDuration end,
-          set = function(v) maxDuration = v if active then active.maxSeconds = v updateBars() end end },
+          set = function(v) maxDuration = v maxDurationOverride = true if active then active.maxSeconds = v active.finishToken = nil layoutFrame() updateBars() end end },
         { type = "slider", key = "width", label = "Bar width", min = 60, max = 500, step = 5,
           default = barWidth, format = "%dpx", get = function() return barWidth end,
           set = function(v) barWidth = v layoutFrame() end },
@@ -336,10 +351,10 @@ function GatheringTimer:GetOptionsSchema()
           choices = soundChoices,
           get = function() return maxSoundKey end, set = function(v) maxSoundKey = v end },
     }
-    for _, e in ipairs(GATHERABLES) do
+    for index, e in ipairs(GATHERABLES) do
         opts[#opts + 1] = {
             type = "checkbox",
-            key = "gather_" .. tostring(e.itemID),
+            key = index <= BUILTIN_COUNT and ("gather_" .. tostring(e.itemID)) or ("gather_custom_" .. index),
             label = e.name .. " (" .. e.kind .. ")",
             tooltip = string.format("Track %s. Respawn %ds-%ds.", e.name, e.minSeconds or DEFAULT_MIN, e.maxSeconds or DEFAULT_MAX),
             default = e.enabled,
@@ -348,6 +363,48 @@ function GatheringTimer:GetOptionsSchema()
         }
     end
     return { name = "Gathering Timer", options = opts }
+end
+
+function GatheringTimer:GetPersistentState()
+    local entries = {}
+    for index, entry in ipairs(GATHERABLES) do
+        if index <= BUILTIN_COUNT then
+            entries[index] = { enabled = entry.enabled }
+        else
+            entries[index] = { itemID = entry.itemID, name = entry.name, kind = entry.kind, enabled = entry.enabled, minSeconds = entry.minSeconds, maxSeconds = entry.maxSeconds }
+        end
+    end
+    local position = savedPosition and { x = savedPosition.x, y = savedPosition.y } or nil
+    return { entries = entries, minDurationOverride = minDurationOverride, maxDurationOverride = maxDurationOverride, debug = DEBUG, position = position }
+end
+
+function GatheringTimer:LoadPersistentState(state)
+    if type(state) ~= "table" then return end
+    if type(state.debug) == "boolean" then DEBUG = state.debug end
+    if type(state.entries) == "table" then
+        for index = 1, BUILTIN_COUNT do
+            local entry = state.entries[index]
+            if type(entry) == "table" and type(entry.enabled) == "boolean" then GATHERABLES[index].enabled = entry.enabled end
+        end
+        for index = BUILTIN_COUNT + 1, #state.entries do
+            local entry = state.entries[index]
+            if type(entry) == "table" and type(entry.name) == "string" and entry.name ~= "" and (entry.kind == "ore" or entry.kind == "herb") and type(entry.enabled) == "boolean" and type(entry.minSeconds) == "number" and entry.minSeconds >= 0 and type(entry.maxSeconds) == "number" and entry.maxSeconds >= 0 and (entry.itemID == nil or type(entry.itemID) == "number") then
+                GATHERABLES[#GATHERABLES + 1] = { itemID = entry.itemID, name = entry.name, kind = entry.kind, enabled = entry.enabled, minSeconds = entry.minSeconds, maxSeconds = entry.maxSeconds }
+            end
+        end
+    end
+    local position = state.position
+    if type(position) == "table" and type(position.x) == "number" and type(position.y) == "number" and position.x == position.x and position.y == position.y and math.abs(position.x) < math.huge and math.abs(position.y) < math.huge then
+        savedPosition = { x = position.x, y = position.y }
+        self.frame:ClearAllPoints()
+        self.frame:SetPoint("CENTER", UIParent, "CENTER", position.x, position.y)
+    end
+end
+
+function GatheringTimer:FinishRestore(state)
+    if type(state) ~= "table" then return end
+    minDurationOverride = state.minDurationOverride == true
+    maxDurationOverride = state.maxDurationOverride == true
 end
 
 local function printStatus()
@@ -370,7 +427,7 @@ function GatheringTimer:HandleCommand(message)
     command = string.lower(command or "")
 
     if command == "test" then
-        startTimers({ name = "Test Node", minSeconds = 5, maxSeconds = 10 })
+        startTimers({ name = "Test Node", minSeconds = 5, maxSeconds = 10 }, true)
         addon.Print("Test bars started (5s / 10s).")
     elseif command == "clear" then
         stopTimers()
@@ -391,7 +448,7 @@ function GatheringTimer:HandleCommand(message)
         addon.Print("Frame unlocked - drag with left button (out of combat).")
     elseif command == "width" or command == "height" then
         local v = tonumber(rest)
-        if not v then addon.Print("Usage: /saboton gather " .. command .. " <px>") return end
+        if not v or v <= 0 then addon.Print("Usage: /saboton gather " .. command .. " <positive px>") return end
         if command == "width" then barWidth = v else barHeight = v end
         layoutFrame()
         addon.Print(command .. " set to " .. v .. "px.")
@@ -404,9 +461,13 @@ function GatheringTimer:HandleCommand(message)
         addon.Print("Orientation: " .. orientation:lower() .. ".")
     elseif command == "min" or command == "max" then
         local v = tonumber(rest)
-        if not v or v <= 0 then addon.Print("Usage: /saboton gather " .. command .. " <seconds>") return end
+        if not v or v < 0 then addon.Print("Usage: /saboton gather " .. command .. " <seconds, 0 or more>") return end
+        if command == "min" then minDuration = v minDurationOverride = true else maxDuration = v maxDurationOverride = true end
         if active then
             if command == "min" then active.minSeconds = v else active.maxSeconds = v end
+            active.finishToken = nil
+            layoutFrame()
+            updateBars()
         end
         addon.Print(command .. " duration set to " .. v .. "s.")
     elseif command == "minsound" or command == "maxsound" then
@@ -420,6 +481,7 @@ function GatheringTimer:HandleCommand(message)
         end
     elseif command == "toggle" then
         local arg = rest:lower()
+        if arg == "" then addon.Print("Usage: /saboton gather toggle <name|id>") return end
         local found
         for _, e in ipairs(GATHERABLES) do
             if tostring(e.itemID) == arg or e.name:lower():find(arg, 1, true) then found = e break end
@@ -428,15 +490,16 @@ function GatheringTimer:HandleCommand(message)
         found.enabled = not found.enabled
         addon.Print(found.name .. " " .. (found.enabled and "enabled" or "disabled") .. ".")
     elseif command == "add" then
-        local idOrName, kind, mn, mx = rest:match("^(%S+)%s+(%S+)%s+(%d+)%s+(%d+)$")
-        if not idOrName then
+        local idOrName, kind, mn, mx = rest:match("^(.-)%s+(%S+)%s+(%d+)%s+(%d+)%s*$")
+        kind = kind and kind:lower()
+        if not idOrName or idOrName == "" or (kind ~= "ore" and kind ~= "herb") then
             addon.Print("Usage: /saboton gather add <itemID|name> <ore|herb> <min> <max>")
             return
         end
         local id = tonumber(idOrName)
         local name = id and ("Item " .. id) or idOrName
         GATHERABLES[#GATHERABLES + 1] = {
-            itemID = id, name = name, kind = (kind == "herb") and "herb" or "ore",
+            itemID = id, name = name, kind = kind,
             enabled = true, minSeconds = tonumber(mn), maxSeconds = tonumber(mx),
         }
         addon.Print("Added " .. name .. " (" .. kind .. ", " .. mn .. "s-" .. mx .. "s), enabled.")
@@ -461,7 +524,13 @@ function GatheringTimer:OnEnable()
     f:SetScript("OnDragStart", function(self)
         if not locked and not (InCombatLockdown and InCombatLockdown()) then self:StartMoving() end
     end)
-    f:SetScript("OnDragStop", function(self) self:StopMovingOrSizing() end)
+    f:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        local x, y = self:GetCenter()
+        local parentX, parentY = UIParent:GetCenter()
+        if x and y and parentX and parentY then savedPosition = { x = x - parentX, y = y - parentY } end
+        if addon.SaveSettings then addon.SaveSettings() end
+    end)
     f:Hide()
     self.frame = f
 

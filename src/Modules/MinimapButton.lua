@@ -50,6 +50,7 @@ local function createButton()
     end)
     button:SetScript("OnDragStop", function(self)
         self:SetScript("OnUpdate", nil)
+        if addon.SaveSettings then addon.SaveSettings() end
     end)
 
     button:SetScript("OnClick", function()
@@ -94,6 +95,17 @@ function MinimapButton:OnEnable()
     self.button = createButton()
     updatePosition(self.button)
     self.button:SetShown(shown)
+end
+
+function MinimapButton:GetPersistentState()
+    return { angle = angle }
+end
+
+function MinimapButton:LoadPersistentState(state)
+    if type(state) == "table" and type(state.angle) == "number" and state.angle == state.angle and math.abs(state.angle) < math.huge then
+        angle = state.angle
+        updatePosition(self.button)
+    end
 end
 
 function MinimapButton:HandleCommand()

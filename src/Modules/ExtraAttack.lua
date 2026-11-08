@@ -11,10 +11,8 @@ local ADDON_NAME, addon = ...
 -- heuristic built on it can never see an extra attack). What DOES fire on this client is the
 -- engine event PLAYER_SWING(swingDuration, swingType), for every auto attack, with plain
 -- (non-secret) numbers. Extra attacks are delivered as main-hand swings, so a MainHand
--- PLAYER_SWING that arrives far earlier than the current swing duration allows is an extra
--- attack -- and in vanilla mechanics, extra attacks RESET the swing timer, so the next
--- scheduled swing lands a full duration later. That makes this detector exact rather than a
--- guess: normal auto-attack cadence physically cannot produce an early swing.
+-- PLAYER_SWING that arrives far earlier than the current swing duration is treated as an
+-- extra attack. This is a timing heuristic and does not identify the triggering spell.
 local ExtraAttack = {}
 
 -- Sound choices selectable from the options dropdown; "key" is what soundKey stores.
@@ -39,7 +37,15 @@ local TEXT_ARC_HEIGHT = 30
 local MAIN_HAND = (Enum and Enum.PlayerSwingType and Enum.PlayerSwingType.MainHand) or 0
 
 local DEBUG = false
-local enabled = false
+function ExtraAttack:GetPersistentState()
+    return { debug = DEBUG }
+end
+
+function ExtraAttack:LoadPersistentState(state)
+    if type(state) == "table" and type(state.debug) == "boolean" then DEBUG = state.debug end
+end
+
+local enabled = true
 local comboWindow = DEFAULT_COMBO_WINDOW
 local comboCount = 0
 local comboExpireTime = 0
@@ -207,9 +213,21 @@ local function resetBurst()
     end
 end
 
+local function flushBurst()
+    local hits = burstHits
+    resetBurst()
+    playBurstCascade(hits)
+    if DEBUG and hits > 0 then
+        addon.Print("Burst settled: " .. hits .. " extra attack hit(s), cascade played.")
+    end
+end
+
 -- One extra-attack hit landed. The combo text updates immediately; the sound waits for the
 -- burst to settle so a multi-hit proc plays one cascade instead of overlapping sounds.
 local function handleProc()
+    if comboCount > 0 and GetTime() >= comboExpireTime then
+        comboCount = 0
+    end
     comboCount = comboCount + 1
     comboExpireTime = GetTime() + comboWindow
     updateComboDisplay()
@@ -223,12 +241,7 @@ local function handleProc()
     end
     burstSettleTimer = C_Timer.NewTimer(burstSettleTime, function()
         burstSettleTimer = nil
-        local hits = burstHits
-        resetBurst()
-        playBurstCascade(hits)
-        if DEBUG then
-            addon.Print("Burst settled: " .. hits .. " extra attack hit(s), cascade played.")
-        end
+        flushBurst()
     end)
 
     if DEBUG then
@@ -240,7 +253,7 @@ end
 -- plain numbers on this client. For a MainHand event: if it arrives far earlier than the
 -- current swing duration allows, an extra attack landed -- vanilla extra attacks both deliver
 -- as instant main-hand swings and reset the swing timer, so a normal auto-attack cadence can
--- never produce this.
+-- normally cannot produce this. Other unusual timing changes can still affect detection.
 --
 -- False-positive guard: parry haste (a mob parrying you advances your swing timer by up to
 -- 40%) also produces an early next swing. True extra attacks land at ~0-15% of the expected
@@ -318,6 +331,7 @@ function ExtraAttack:GetOptionsSchema()
                     enabled = value
                     if not enabled then
                         lastMHSwingAt = nil
+                        resetBurst()
                         resetCombo()
                     end
                 end,
@@ -448,11 +462,7 @@ function ExtraAttack:OnEnable()
     self.comboDisplay = createComboDisplay()
 
     self.frame = CreateFrame("Frame")
-    -- PLAYER_SWING is the one swing-level channel that exists on this client; registering it
-    -- cannot throw. The other registrations are wrapped in pcall because on this client an
-    -- unknown event errors and would abort the rest of this handler (kit finding).
     self.frame:RegisterEvent("PLAYER_SWING")
-    pcall(self.frame.RegisterEvent, self.frame, "COMBAT_TEXT_UPDATE") -- harmless fallback if some build delivers it
     self.frame:RegisterEvent("PLAYER_REGEN_DISABLED")
     self.frame:RegisterEvent("PLAYER_REGEN_ENABLED")
     self.frame:SetScript("OnEvent", function(_, event, ...)
@@ -467,22 +477,8 @@ function ExtraAttack:OnEnable()
             return
         elseif event == "PLAYER_REGEN_ENABLED" then
             lastMHSwingAt = nil
-            resetBurst()
+            flushBurst()
             return
-        end
-
-        if not enabled then
-            return
-        end
-
-        -- COMBAT_TEXT_UPDATE kept as a harmless fallback in case some client/build does deliver this.
-        local messageType = ...
-        if DEBUG then
-            addon.Print("COMBAT_TEXT_UPDATE: " .. tostring(messageType))
-        end
-
-        if messageType == "EXTRA_ATTACKS" then
-            handleProc()
         end
     end)
 end

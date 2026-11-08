@@ -2,12 +2,13 @@ local now = 0
 local frames = {}
 local timers = {}
 local module
+local sounds = 0
 
 UIParent = {}
 Enum = { PlayerSwingType = { MainHand = 0 } }
 function GetTime() return now end
 function issecretvalue(...) return false end
-function PlaySoundFile(...) return true end
+function PlaySoundFile(...) sounds = sounds + 1 return true end
 
 C_Timer = {}
 function C_Timer.NewTicker(_, callback)
@@ -50,7 +51,7 @@ local addon = {
 assert(loadfile("src/Modules/ExtraAttack.lua"))("SabotonEssentials", addon)
 module:OnEnable()
 local options = module:GetOptionsSchema().options
-options[1].set(true)
+assert(options[1].get() == true and options[1].default == true)
 local display = frames[1]
 
 module:HandleCommand("test")
@@ -134,5 +135,21 @@ assert(display.alpha == 1 and display.x == -150 and display.text.value == "x1 Ka
 now = 8.7
 display.scripts.OnUpdate(display, 2.9)
 assert(not display.shown and not display.scripts.OnUpdate)
+
+local eventFrame = frames[2]
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_DISABLED")
+now = 10
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_SWING", 2, 0)
+now = 10.1
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_SWING", 2, 0)
+assert(display.shown)
+local previousSounds = sounds
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
+assert(sounds == previousSounds + 1)
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
+assert(sounds == previousSounds + 1)
+now = 11
+module:HandleCommand("test")
+assert(display.text.value == "x1 Ka-ching!")
 
 print("Extra Attack animation tests passed")

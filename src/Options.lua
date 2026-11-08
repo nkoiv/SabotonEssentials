@@ -8,6 +8,11 @@ local Options = {}
 
 local settingsAvailable = rawget(_G, "Settings") ~= nil
 
+local function saveOption(spec, value)
+    spec.set(value)
+    if addon.SaveSettings then addon.SaveSettings() end
+end
+
 -- Settings proxy variable keys are global across the client, so namespace them per addon+module+option.
 local function toVariableKey(moduleKey, optionKey)
     return string.format("SABOTONESSENTIALS_%s_%s", string.upper(moduleKey), string.upper(optionKey))
@@ -21,7 +26,7 @@ local function createCheckbox(subcategory, moduleKey, spec)
         spec.label,
         spec.default or false,
         spec.get,
-        spec.set
+        function(value) saveOption(spec, value) end
     )
 
     Settings.CreateCheckbox(subcategory, setting, spec.tooltip)
@@ -35,7 +40,7 @@ local function createSlider(subcategory, moduleKey, spec)
         spec.label,
         spec.default or spec.min or 0,
         spec.get,
-        spec.set
+        function(value) saveOption(spec, value) end
     )
 
     local sliderOptions = Settings.CreateSliderOptions(spec.min, spec.max, spec.step)
@@ -54,7 +59,7 @@ local function createDropdown(subcategory, moduleKey, spec)
         spec.label,
         spec.default,
         spec.get,
-        spec.set
+        function(value) saveOption(spec, value) end
     )
 
     -- spec.choices may be a static list or a function, so callers can compute choices dynamically
@@ -118,7 +123,7 @@ local function createFallbackPanel()
             slider:SetValue(spec.get())
             label:SetText(spec.label .. ": " .. string.format(spec.format, spec.get()))
             slider:SetScript("OnValueChanged", function(_, value)
-                spec.set(value)
+                saveOption(spec, value)
                 label:SetText(spec.label .. ": " .. string.format(spec.format, value))
             end)
             refreshers[#refreshers + 1] = function()
@@ -170,7 +175,7 @@ local function createTextInput(subcategory, moduleKey, spec)
         spec.label,
         spec.default,
         spec.get,
-        spec.set
+        function(value) saveOption(spec, value) end
     )
 
     local data = Settings.CreateSettingInitializerData(setting, nil, spec.tooltip)
