@@ -3,12 +3,13 @@ local frames = {}
 local timers = {}
 local module
 local sounds = 0
+local lastSoundPath
 
 UIParent = {}
 Enum = { PlayerSwingType = { MainHand = 0 } }
 function GetTime() return now end
 function issecretvalue(...) return false end
-function PlaySoundFile(...) sounds = sounds + 1 return true end
+function PlaySoundFile(path, ...) sounds = sounds + 1 lastSoundPath = path return true end
 
 C_Timer = {}
 function C_Timer.NewTicker(_, callback)
@@ -151,5 +152,19 @@ assert(sounds == previousSounds + 1)
 now = 11
 module:HandleCommand("test")
 assert(display.text.value == "x1 Ka-ching!")
+
+local soundOption
+for _, option in ipairs(options) do
+    if option.key == "soundKey" then soundOption = option end
+end
+local foundHuagh = false
+for _, choice in ipairs(soundOption.choices) do
+    if choice.value == "huagh" and choice.label == "HUAGH" then foundHuagh = true end
+end
+assert(foundHuagh)
+module:HandleCommand("soundkey huagh")
+assert(soundOption.get() == "huagh")
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
+assert(lastSoundPath == "Interface\\AddOns\\SabotonEssentials\\Media\\HumanMaleAggroA.ogg")
 
 print("Extra Attack animation tests passed")

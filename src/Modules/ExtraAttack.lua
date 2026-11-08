@@ -20,6 +20,7 @@ local SOUND_OPTIONS = {
     { key = "none", label = "No sound", silent = true },
     { key = "kaching", label = "Ka-ching!", path = "Interface\\AddOns\\SabotonEssentials\\Media\\kaching.mp3" },
     { key = "squeak", label = "Squeaky Toy", path = "Interface\\AddOns\\SabotonEssentials\\Media\\squeak.mp3" },
+    { key = "huagh", label = "HUAGH", path = "Interface\\AddOns\\SabotonEssentials\\Media\\HumanMaleAggroA.ogg" },
 }
 
 local DEFAULT_COMBO_WINDOW = 1.0
@@ -540,7 +541,7 @@ function ExtraAttack:HandleCommand(message)
         local key = string.lower(rest)
         local soundOption = findSoundOption(key)
         if not soundOption or soundOption.key ~= key then
-            addon.Print("Usage: /saboton extraattack soundkey <kaching|squeak>")
+            addon.Print("Usage: /saboton extraattack soundkey <none|kaching|squeak|huagh>")
         else
             soundKey = soundOption.key
             addon.Print("Sound set to " .. soundOption.label .. ".")

@@ -40,7 +40,7 @@ Restart the game or run `/reload`.
 
 ## Configuration
 
-The addon includes `Media\squeak.mp3`, `Media\kaching.mp3`, `Media\clear-bell-chime.mp3`, and `Media\impact-thud.mp3`. Missing or unsupported sound files produce a chat warning.
+The addon includes `Media\squeak.mp3`, `Media\kaching.mp3`, `Media\HumanMaleAggroA.ogg`, `Media\clear-bell-chime.mp3`, and `Media\impact-thud.mp3`. Missing or unsupported sound files produce a chat warning.
 
 Settings, custom gatherables, and frame positions are stored in the account-wide `SabotonEssentialsDB` SavedVariables database. WoW writes it on `/reload` or a normal logout and restores it when the addon loads. The addon kit documented a bug in Forever beta build 1.60.1.69893 where the client writes SavedVariables but does not load them again; its status on later builds is not established here. On an affected build, these settings can still reset despite being saved. There is currently no built-in workaround.
 
@@ -66,7 +66,7 @@ All commands go through `/saboton <module> <command>`.
 - `/saboton extraattack textformat <format>` - customize the combo text, `%d` is replaced with the combo count; also editable as a text box in Options
 - `/saboton extraattack xoffset <number>` / `yoffset <number>` - shift the entire combo-text arc horizontally or vertically in UI units; positive values move right or up. Also available as sliders in Options
 - `/saboton extraattack sound` - toggle the sound (on by default); also available as a checkbox in Options
-- `/saboton extraattack soundkey <none|kaching|squeak>` - set which sound plays; also available as a dropdown in Options
+- `/saboton extraattack soundkey <none|kaching|squeak|huagh>` - set which sound plays; also available as a dropdown in Options
 - `/saboton extraattack stagger <seconds>` - time between the sounds of a multi-hit burst (default 0.09s); also available as a slider in Options
 - `/saboton gather status` - print the current state, active timer, and which gatherables are tracked
 - `/saboton gather test` - start short test bars (5s / 10s) without needing a node
