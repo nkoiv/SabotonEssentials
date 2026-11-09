@@ -1,0 +1,6 @@
+package-as: SabotonEssentials
+
+ignore:
+  - tests
+  - Media/originals
+  - sabotonessentials_logo.png

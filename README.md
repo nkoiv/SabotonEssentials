@@ -106,3 +106,25 @@ All commands go through `/saboton <module> <command>`.
 ## Tests
 
 Run the Lua files in `tests/` from the addon root with a Lua interpreter. They use mocked WoW APIs and do not replace in-game testing. For example, with Node.js available, run `npx --yes --package fengari-node-cli fengari tests/test_gathering_timer.lua`.
+
+## Releases
+
+To create a ZIP locally on Windows for manual CurseForge upload, run from the addon root:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\package-release.ps1
+```
+
+The script reads the TOC version and writes `releases\SabotonEssentials-<version>.zip`. The `releases` directory is ignored by Git. It packages the current working files, including uncommitted changes, and refuses to overwrite an existing ZIP; move or remove that ZIP to rebuild the same version. Run the tests and check the addon in-game before uploading.
+
+Releases use the [BigWigs WoW Packager](https://github.com/BigWigsMods/packager). It builds a ZIP containing the `SabotonEssentials` addon directory, detects Forever from interface `16001`, and generates release notes from Git history. Tests and original media sources are excluded from the ZIP.
+
+1. Update `## Version` in `SabotonEssentials.toc` and commit the change. The first release is `0.1.0`.
+2. Create and push an annotated tag matching the version, for example `git tag -a v0.1.0 -m "Release 0.1.0"` followed by `git push origin v0.1.0`.
+3. GitHub Actions runs the Lua tests, verifies the archive, and publishes it as a GitHub release and workflow artifact. Tags such as `v0.2.0-beta.1` or `v0.2.0-alpha.1` are marked as prereleases; the TOC version must match without the leading `v`.
+
+For automatic CurseForge uploads, create the WoW addon project on CurseForge, add its numeric project ID as the GitHub Actions repository variable `CURSEFORGE_PROJECT_ID`, and add an [author API token](https://authors.curseforge.com/#/settings/api-tokens) as the repository secret `CF_API_TOKEN`. Both are required if either is configured. Without them the workflow still publishes the ZIP on GitHub, where it can be downloaded and uploaded manually. CurseForge processes and may review uploaded files before publication; check that it lists the intended Forever game version. Re-running a successful CurseForge upload can create a duplicate file.
+
+The [CurseForge upload API](https://support.curseforge.com/en/support/solutions/articles/9000197321-curseforge-upload-api) is separate from the public CurseForge mod-distribution API. The packager assigns the release type from the tag and looks up the game version using the TOC interface number. Update the interface only after testing against the target client.
+
+For project submission, CurseForge requests an English description, an appropriate license and categories, and an original square PNG logo of at least 400x400 pixels. Verify that all bundled media can be redistributed. CurseForge's WoW processor expects a ZIP with folders at its root and a case-matching `SabotonEssentials/SabotonEssentials.toc`. New projects need an approved release or beta file to sync to the CurseForge app. See the [submission guide](https://support.curseforge.com/support/solutions/articles/9000199552-project-submission-guide-and-tips), [file types](https://support.curseforge.com/support/solutions/articles/9000197242-file-project-types-and-additional-fields), and [WoW file processor rules](https://support.curseforge.com/support/solutions/articles/9000210425-curseforge-file-processor-errors-per-game).

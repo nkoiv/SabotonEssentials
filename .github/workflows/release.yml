@@ -1,0 +1,99 @@
+name: Package and release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Lua 5.1
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.1
+
+      - name: Validate release version and CurseForge configuration
+        env:
+          TAG: ${{ github.ref_name }}
+          CF_PROJECT_ID: ${{ vars.CURSEFORGE_PROJECT_ID }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: |
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-((alpha|beta)(\.[0-9]+)?))?$ ]] || { echo "Invalid release tag: $TAG"; exit 1; }
+          version=$(sed -n 's/^## Version: *//p' SabotonEssentials.toc | tr -d '\r')
+          [[ "$version" == "${TAG#v}" ]] || { echo "TOC version does not match $TAG"; exit 1; }
+          if [[ -n "$CF_PROJECT_ID" || -n "$CF_API_TOKEN" ]]; then
+            [[ "$CF_PROJECT_ID" =~ ^[0-9]+$ && -n "$CF_API_TOKEN" ]] || { echo 'Set both CURSEFORGE_PROJECT_ID and CF_API_TOKEN.'; exit 1; }
+          fi
+
+      - name: Run addon tests
+        run: |
+          for test in tests/test_*.lua; do
+            lua5.1 "$test"
+          done
+
+      - name: Build addon ZIP
+        uses: BigWigsMods/packager@v2.7.0
+        with:
+          args: -d
+          pandoc: 'false'
+
+      - name: Check addon ZIP
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          shopt -s nullglob
+          archives=(.release/*.zip)
+          [[ ${#archives[@]} -eq 1 ]] || { echo 'Expected exactly one addon ZIP.'; exit 1; }
+          archive="${archives[0]}"
+          unzip -t "$archive"
+          unzip -Z1 "$archive" | grep -q '^SabotonEssentials/SabotonEssentials.toc$'
+          ! unzip -Z1 "$archive" | grep -qv '^SabotonEssentials/'
+          ! unzip -Z1 "$archive" | grep -Eq '^SabotonEssentials/(tests/|Media/originals/)'
+          unzip -p "$archive" SabotonEssentials/SabotonEssentials.toc | tr -d '\r' | grep -Fx "## Version: ${TAG#v}"
+          while IFS= read -r entry; do
+            entry=${entry%$'\r'}
+            [[ -z "$entry" || "$entry" == \#* ]] && continue
+            entry=${entry//\\//}
+            unzip -Z1 "$archive" | grep -Fx "SabotonEssentials/$entry" > /dev/null
+          done < SabotonEssentials.toc
+          for sound in squeak.mp3 kaching.mp3 HumanMaleAggroA.ogg clear-bell-chime.mp3 impact-thud.mp3; do
+            unzip -Z1 "$archive" | grep -Fx "SabotonEssentials/Media/$sound" > /dev/null
+          done
+
+      - name: Save ZIP as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SabotonEssentials-${{ github.ref_name }}
+          path: .release/*.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" .release/*.zip --clobber
+          else
+            prerelease=()
+            [[ "$TAG" == *-alpha* || "$TAG" == *-beta* ]] && prerelease+=(--prerelease)
+            gh release create "$TAG" .release/*.zip --verify-tag --title "$TAG" --notes-file .release/SabotonEssentials/CHANGELOG.md "${prerelease[@]}"
+          fi
+
+      - name: Publish to CurseForge
+        if: ${{ vars.CURSEFORGE_PROJECT_ID != '' }}
+        uses: BigWigsMods/packager@v2.7.0
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        with:
+          args: -p ${{ vars.CURSEFORGE_PROJECT_ID }}
+          pandoc: 'false'
