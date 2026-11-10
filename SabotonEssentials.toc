@@ -2,7 +2,7 @@
 ## Title: Saboton Essentials
 ## Notes: Extra attack sounds, gathering timers, and configurable death sounds.
 ## Author: nikok
-## Version: 0.1.0
+## Version: 0.2.0-beta
 ## DefaultState: enabled
 ## IconTexture: Interface\Icons\Spell_Frost_FrostNova
 ## SavedVariables: SabotonEssentialsDB
