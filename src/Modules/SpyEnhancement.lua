@@ -2,7 +2,7 @@ local ADDON_NAME, addon = ...
 
 -- SpyEnhancement module: Integrates with Spy addon for guild-wide enhancements
 -- Phase 1: Core KoS (Kill On Sight) Sync system
--- TODO: Phase 2: Guild tagging system
+-- Phase 2: Guild tagging system (IN PROGRESS)
 -- TODO: Phase 3: Cyrillic nationality detection
 
 local SpyEnhancement = {}
@@ -17,10 +17,18 @@ local options = {
     enabled = true,
     syncMode = "both", -- "automatic", "manual", "both"
     showSyncNotifications = true,
+    guildTaggingEnabled = true,
 }
 
 -- KoS subsystem (Phase 1)
 local KoSSync = {}
+
+-- ============================================================================
+-- PHASE 2: GUILD TAGGING SYSTEM
+-- ============================================================================
+
+-- Guild tagging subsystem (Phase 2)
+local GuildTag = {}
 
 -- ============================================================================
 -- DATA STRUCTURE UTILITIES
@@ -262,6 +270,223 @@ function KoSSync:GetStats()
 end
 
 -- ============================================================================
+-- GUILD TAGGING API (Phase 2)
+-- ============================================================================
+
+-- Create a guild entry
+local function createGuildEntry(guildName, notes)
+    return {
+        guildName = guildName,
+        addedBy = UnitName("player"),
+        addedAt = time(),
+        notes = notes or "",
+        memberCount = 0,           -- Tracked members
+        lastSeen = 0,              -- Last time a member was detected
+        rejected = false,          -- Local override
+    }
+end
+
+-- Normalize guild name for storage
+local function getNormalizedGuildKey(guildName)
+    return string.lower(guildName)
+end
+
+-- Add a guild to hostile list
+function GuildTag:Add(guildName, notes)
+    if not guildName or guildName == "" then
+        addon.Print("SpyEnhancement: Invalid guild name.")
+        return false
+    end
+
+    local db = getDB()
+    local key = getNormalizedGuildKey(guildName)
+
+    -- Create entry
+    local entry = createGuildEntry(guildName, notes)
+    db.hosileGuilds[key] = entry
+
+    addon.Print(string.format("SpyEnhancement: Added guild %s to hostile list", guildName))
+    return true
+end
+
+-- Remove a guild from hostile list
+function GuildTag:Remove(guildName)
+    if not guildName or guildName == "" then
+        addon.Print("SpyEnhancement: Invalid guild name.")
+        return false
+    end
+
+    local db = getDB()
+    local key = getNormalizedGuildKey(guildName)
+
+    if db.hosileGuilds[key] then
+        db.hosileGuilds[key] = nil
+        addon.Print(string.format("SpyEnhancement: Removed guild %s from hostile list", guildName))
+        
+        -- Also remove associated members
+        if db.guildMembers[key] then
+            db.guildMembers[key] = nil
+        end
+        return true
+    end
+
+    addon.Print(string.format("SpyEnhancement: Guild %s not found", guildName))
+    return false
+end
+
+-- Reject a hostile guild locally (keep data but ignore)
+function GuildTag:Reject(guildName, reason)
+    if not guildName or guildName == "" then
+        addon.Print("SpyEnhancement: Invalid guild name.")
+        return false
+    end
+
+    local db = getDB()
+    local key = getNormalizedGuildKey(guildName)
+
+    if db.hosileGuilds[key] then
+        db.hosileGuilds[key].rejected = true
+        addon.Print(string.format("SpyEnhancement: Rejected guild %s (%s)", guildName, reason or "no reason"))
+        return true
+    end
+
+    addon.Print(string.format("SpyEnhancement: Guild %s not found", guildName))
+    return false
+end
+
+-- Accept a rejected guild
+function GuildTag:Accept(guildName)
+    if not guildName or guildName == "" then
+        addon.Print("SpyEnhancement: Invalid guild name.")
+        return false
+    end
+
+    local db = getDB()
+    local key = getNormalizedGuildKey(guildName)
+
+    if db.hosileGuilds[key] and db.hosileGuilds[key].rejected then
+        db.hosileGuilds[key].rejected = false
+        addon.Print(string.format("SpyEnhancement: Re-accepted guild %s", guildName))
+        return true
+    end
+
+    addon.Print(string.format("SpyEnhancement: Guild %s not rejected or not found", guildName))
+    return false
+end
+
+-- Get a guild entry
+function GuildTag:Get(guildName)
+    local db = getDB()
+    local key = getNormalizedGuildKey(guildName)
+    local entry = db.hosileGuilds[key]
+
+    -- Don't return rejected entries
+    if entry and not entry.rejected then
+        return entry
+    end
+
+    return nil
+end
+
+-- Check if guild is flagged as hostile
+function GuildTag:IsHostile(guildName)
+    return self:Get(guildName) ~= nil
+end
+
+-- Register a guild member (auto-called when player detected in Spy)
+function GuildTag:RegisterMember(guildName, playerName, realm)
+    if not guildName or not playerName then
+        return false
+    end
+
+    local db = getDB()
+    local guildKey = getNormalizedGuildKey(guildName)
+    local playerKey = getNormalizedKey(playerName, realm)
+
+    -- Only track if guild is marked hostile
+    if not db.hosileGuilds[guildKey] then
+        return false
+    end
+
+    -- Initialize guild members table
+    if not db.guildMembers[guildKey] then
+        db.guildMembers[guildKey] = {}
+    end
+
+    -- Track member
+    local now = time()
+    db.guildMembers[guildKey][playerKey] = {
+        playerName = playerName,
+        realm = realm,
+        detected = db.guildMembers[guildKey][playerKey] and db.guildMembers[guildKey][playerKey].detected or now,
+        updated = now,
+    }
+
+    -- Update guild's lastSeen and memberCount
+    db.hosileGuilds[guildKey].lastSeen = now
+    db.hosileGuilds[guildKey].memberCount = 0
+    for _ in pairs(db.guildMembers[guildKey]) do
+        db.hosileGuilds[guildKey].memberCount = db.hosileGuilds[guildKey].memberCount + 1
+    end
+
+    return true
+end
+
+-- Get all members of a hostile guild
+function GuildTag:GetMembers(guildName)
+    local db = getDB()
+    local key = getNormalizedGuildKey(guildName)
+
+    if not db.guildMembers[key] then
+        return {}
+    end
+
+    local result = {}
+    for playerKey, member in pairs(db.guildMembers[key]) do
+        table.insert(result, member)
+    end
+    return result
+end
+
+-- Get all active hostile guilds
+function GuildTag:GetAll()
+    local db = getDB()
+    local result = {}
+
+    for key, entry in pairs(db.hosileGuilds) do
+        if not entry.rejected then
+            table.insert(result, entry)
+        end
+    end
+
+    return result
+end
+
+-- Get guild stats
+function GuildTag:GetStats()
+    local db = getDB()
+    local allCount = 0
+    local rejectedCount = 0
+    local totalMembers = 0
+
+    for _, entry in pairs(db.hosileGuilds) do
+        if entry.rejected then
+            rejectedCount = rejectedCount + 1
+        else
+            allCount = allCount + 1
+            totalMembers = totalMembers + entry.memberCount
+        end
+    end
+
+    return {
+        active = allCount,
+        rejected = rejectedCount,
+        totalGuilds = allCount + rejectedCount,
+        trackedMembers = totalMembers,
+    }
+end
+
+-- ============================================================================
 -- MANUAL SYNC (Phase 1 only - no network yet)
 -- ============================================================================
 
@@ -327,7 +552,7 @@ function SpyEnhancement:OnEnable()
     end
 
     spyAvailable = true
-    addon.Print("SpyEnhancement: Loaded (Phase 1: KoS Sync)")
+    addon.Print("SpyEnhancement: Loaded (Phase 1: KoS Sync + Phase 2: Guild Tagging)")
 
     -- Initialize database
     getDB()
@@ -368,10 +593,19 @@ function SpyEnhancement:GetSpyOptionsTable()
                 end,
                 order = 11,
             },
-            phase2Info = {
+            phase2Header = {
                 type = "header",
-                name = "Phase 2: Guild Tagging (Coming Soon)",
+                name = "Phase 2: Guild Tagging (ACTIVE)",
                 order = 20,
+            },
+            guildStats = {
+                type = "description",
+                name = function()
+                    local stats = GuildTag:GetStats()
+                    return string.format("Hostile Guilds: %d | Tracked Members: %d | Rejected: %d",
+                        stats.active, stats.trackedMembers, stats.rejected)
+                end,
+                order = 21,
             },
             phase3Info = {
                 type = "header",
@@ -471,19 +705,117 @@ function SpyEnhancement:HandleCommand(args)
         return
     end
 
+    -- ========================================================================
+    -- GUILD TAGGING COMMANDS (Phase 2)
+    -- ========================================================================
+
+    if subcommand == "addguild" then
+        local guildName = string.match(rest, "^(%S+)")
+        if not guildName then
+            addon.Print("Usage: /saboton spyenhancement addguild <guildname> [notes]")
+            return
+        end
+        local notes = string.match(rest, "^%S+%s+(.+)$") or ""
+        GuildTag:Add(guildName, notes)
+        return
+    end
+
+    if subcommand == "removeguild" or subcommand == "rmguild" then
+        local guildName = string.match(rest, "^(%S+)")
+        if not guildName then
+            addon.Print("Usage: /saboton spyenhancement removeguild <guildname>")
+            return
+        end
+        GuildTag:Remove(guildName)
+        return
+    end
+
+    if subcommand == "rejectguild" then
+        local guildName = string.match(rest, "^(%S+)")
+        if not guildName then
+            addon.Print("Usage: /saboton spyenhancement rejectguild <guildname> [reason]")
+            return
+        end
+        local reason = string.match(rest, "^%S+%s+(.+)$") or ""
+        GuildTag:Reject(guildName, reason)
+        return
+    end
+
+    if subcommand == "acceptguild" then
+        local guildName = string.match(rest, "^(%S+)")
+        if not guildName then
+            addon.Print("Usage: /saboton spyenhancement acceptguild <guildname>")
+            return
+        end
+        GuildTag:Accept(guildName)
+        return
+    end
+
+    if subcommand == "guildlist" then
+        local guilds = GuildTag:GetAll()
+        if #guilds == 0 then
+            addon.Print("No hostile guilds")
+            return
+        end
+        addon.Print(string.format("Hostile Guilds (%d):", #guilds))
+        for i, guild in ipairs(guilds) do
+            addon.Print(string.format("  %d. [%s] %d members, last seen: %s ago",
+                i,
+                guild.guildName,
+                guild.memberCount,
+                guild.lastSeen > 0 and math.floor((time() - guild.lastSeen) / 60) .. "m" or "never"))
+            if guild.notes ~= "" then
+                addon.Print(string.format("     Notes: %s", guild.notes))
+            end
+        end
+        return
+    end
+
+    if subcommand == "guildmembers" then
+        local guildName = string.match(rest, "^(%S+)")
+        if not guildName then
+            addon.Print("Usage: /saboton spyenhancement guildmembers <guildname>")
+            return
+        end
+        
+        local members = GuildTag:GetMembers(guildName)
+        if #members == 0 then
+            addon.Print(string.format("No members tracked for guild %s", guildName))
+            return
+        end
+        
+        addon.Print(string.format("Members of [%s] (%d):", guildName, #members))
+        for i, member in ipairs(members) do
+            local seenAgo = math.floor((time() - member.updated) / 60)
+            addon.Print(string.format("  %d. %s (last seen: %dm ago)", i, member.playerName, seenAgo))
+        end
+        return
+    end
+
     addon.Print("Unknown command. Use '/saboton spyenhancement help'")
 end
 
 function SpyEnhancement:PrintHelp()
-    addon.Print("SpyEnhancement Commands (Phase 1: KoS Sync):")
-    addon.Print("  /saboton spyenhancement status      - Show KoS statistics")
-    addon.Print("  /saboton spyenhancement sync        - Manual sync with guildies")
-    addon.Print("  /saboton spyenhancement add <name>  - Add player to personal KoS")
-    addon.Print("  /saboton spyenhancement remove <n>  - Remove from personal KoS")
-    addon.Print("  /saboton spyenhancement list        - List all KoS entries")
-    addon.Print("  /saboton spyenhancement reject <n>  - Reject synced entry")
-    addon.Print("  /saboton spyenhancement accept <n>  - Re-accept rejected entry")
-    addon.Print("  /saboton spyenhancement help        - Show this help")
+    addon.Print("SpyEnhancement Commands (Phase 1: KoS Sync + Phase 2: Guild Tagging):")
+    addon.Print("")
+    addon.Print("  KoS Commands:")
+    addon.Print("    /saboton spyenhancement status           - Show KoS statistics")
+    addon.Print("    /saboton spyenhancement sync             - Manual sync with guildies")
+    addon.Print("    /saboton spyenhancement add <name>       - Add player to personal KoS")
+    addon.Print("    /saboton spyenhancement remove <name>    - Remove from personal KoS")
+    addon.Print("    /saboton spyenhancement list             - List all KoS entries")
+    addon.Print("    /saboton spyenhancement reject <name>    - Reject synced entry")
+    addon.Print("    /saboton spyenhancement accept <name>    - Re-accept rejected entry")
+    addon.Print("")
+    addon.Print("  Guild Commands (Phase 2):")
+    addon.Print("    /saboton spyenhancement addguild <name>      - Mark guild as hostile")
+    addon.Print("    /saboton spyenhancement removeguild <name>   - Remove guild from list")
+    addon.Print("    /saboton spyenhancement guildlist            - List all hostile guilds")
+    addon.Print("    /saboton spyenhancement guildmembers <name>  - Show tracked members")
+    addon.Print("    /saboton spyenhancement rejectguild <name>   - Reject guild locally")
+    addon.Print("    /saboton spyenhancement acceptguild <name>   - Re-accept guild")
+    addon.Print("")
+    addon.Print("    /saboton spyenhancement help             - Show this help")
 end
 
 addon.RegisterModule("spyenhancement", SpyEnhancement)
