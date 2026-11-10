@@ -12,5 +12,6 @@ src\Modules\SqueakyToy.lua
 src\Modules\ExtraAttack.lua
 src\Modules\GatheringTimer.lua
 src\Modules\MinimapButton.lua
+src\Modules\SpyEnhancement.lua
 src\Options.xml
 src\Options.lua
