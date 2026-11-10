@@ -1083,6 +1083,17 @@ function SpyEnhancement:HandleCommand(args)
         return
     end
 
+    -- UI commands (delegated to SpyEnhancementUI module)
+    if subcommand == "ui" or subcommand == "window" then
+        local uiModule = addon.modules.spyenhancementui
+        if uiModule then
+            uiModule:HandleCommand(rest or "ui")
+        else
+            addon.Print("SpyEnhancementUI module not loaded")
+        end
+        return
+    end
+
     if subcommand == "status" then
         local kosStats = KoSSync:GetStats()
         addon.Print("SpyEnhancement Status:")
@@ -1340,14 +1351,17 @@ end
 function SpyEnhancement:PrintHelp()
     addon.Print("SpyEnhancement Commands (Phase 1-4: KoS Sync + Guild Tagging + Cyrillic + Network):")
     addon.Print("")
+    addon.Print("  UI Commands:")
+    addon.Print("    /saboton spyenhancement ui              - Open main window")
+    addon.Print("    /saboton spyenhancement status          - Show detailed status (CLI)")
+    addon.Print("")
     addon.Print("  KoS Commands:")
-    addon.Print("    /saboton spyenhancement status           - Show detailed status (KoS + Network)")
-    addon.Print("    /saboton spyenhancement sync             - Manual broadcast KoS to guild (network)")
-    addon.Print("    /saboton spyenhancement add <name>       - Add player to personal KoS")
-    addon.Print("    /saboton spyenhancement remove <name>    - Remove from personal KoS")
-    addon.Print("    /saboton spyenhancement list             - List all KoS entries")
-    addon.Print("    /saboton spyenhancement reject <name>    - Reject synced entry")
-    addon.Print("    /saboton spyenhancement accept <name>    - Re-accept rejected entry")
+    addon.Print("    /saboton spyenhancement sync            - Broadcast KoS to guild (network)")
+    addon.Print("    /saboton spyenhancement add <name>      - Add player to personal KoS")
+    addon.Print("    /saboton spyenhancement remove <name>   - Remove from personal KoS")
+    addon.Print("    /saboton spyenhancement list            - List all KoS entries")
+    addon.Print("    /saboton spyenhancement reject <name>   - Reject synced entry")
+    addon.Print("    /saboton spyenhancement accept <name>   - Re-accept rejected entry")
     addon.Print("")
     addon.Print("  Guild Commands (Phase 2):")
     addon.Print("    /saboton spyenhancement addguild <name>      - Mark guild as hostile")
