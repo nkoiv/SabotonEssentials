@@ -1,12 +1,12 @@
-local ADDON_NAME, addon = ...
-
 -- SpyEnhancement module: Integrates with Spy addon for guild-wide enhancements
 -- Phase 1: Core KoS (Kill On Sight) Sync system
 -- Phase 2: Guild tagging system
--- Phase 3: Cyrillic nationality detection (IN PROGRESS)
+-- Phase 3: Cyrillic nationality detection
+-- Phase 4: Network Sync via AceComm (IN PROGRESS)
 
 local SpyEnhancement = {}
 local spyAvailable = false
+local aceCommAvailable = false
 
 -- ============================================================================
 -- PHASE 1: KoS SYNC SYSTEM
@@ -18,6 +18,8 @@ local options = {
     syncMode = "both", -- "automatic", "manual", "both"
     showSyncNotifications = true,
     guildTaggingEnabled = true,
+    networkSyncEnabled = true,
+    syncBroadcastInterval = 300, -- Seconds between auto-sync broadcasts
 }
 
 -- KoS subsystem (Phase 1)
@@ -29,6 +31,13 @@ local KoSSync = {}
 
 -- Guild tagging subsystem (Phase 2)
 local GuildTag = {}
+
+-- ============================================================================
+-- PHASE 4: NETWORK SYNC VIA ACECOMM
+-- ============================================================================
+
+-- Network subsystem (Phase 4)
+local NetworkSync = {}
 
 -- ============================================================================
 -- DATA STRUCTURE UTILITIES
@@ -648,20 +657,255 @@ function CyrillicDetector:DetectBatch(playerNames)
 end
 
 -- ============================================================================
--- MANUAL SYNC (Phase 1 only - no network yet)
+-- NETWORK SYNC API (Phase 4)
 -- ============================================================================
 
-function KoSSync:ManualSync()
-    addon.Print("SpyEnhancement: Manual sync triggered (network not yet implemented)")
+-- Sync message format version
+local SYNC_MESSAGE_VERSION = 1
+
+-- Sync message channel (needs to be unique and guild-safe)
+local SYNC_CHANNEL_PREFIX = "SabotonSpySync"
+
+-- Get AceComm library if available
+local function getAceComm()
+    if not LibStub then return nil end
+    return LibStub:GetLibrary("AceComm-3.0", true)
+end
+
+-- Serialize KoS entries for network transmission (compact format)
+local function serializeKosEntries(entries)
+    local serialized = {}
+    for _, entry in ipairs(entries) do
+        -- Pack into minimal format to save bandwidth
+        table.insert(serialized, {
+            n = entry.playerName,  -- name
+            r = entry.realm,       -- realm
+            a = entry.addedBy,     -- added by
+            t = entry.addedAt,     -- timestamp
+            s = entry.source,      -- source
+            o = entry.notes,       -- notes (optional)
+        })
+    end
+    return serialized
+end
+
+-- Deserialize received KoS entries
+local function deserializeKosEntries(serialized, sourceGuildie)
+    local entries = {}
+    for _, data in ipairs(serialized) do
+        table.insert(entries, {
+            playerName = data.n,
+            realm = data.r,
+            source = "guild",                    -- Network sync always marks as "guild" source
+            addedBy = data.a,                    -- Original adder
+            addedAt = data.t,
+            notes = data.o or "",
+            syncFrom = sourceGuildie,            -- Track who we got this from
+            sourceGuild = nil,
+            rejected = false,
+            rejectedAt = nil,
+            rejectionReason = nil,
+            cyrillicNationality = nil,
+        })
+    end
+    return entries
+end
+
+-- Prepare sync message for transmission
+local function createSyncMessage(kosEntries)
+    return {
+        version = SYNC_MESSAGE_VERSION,
+        timestamp = time(),
+        sender = UnitName("player"),
+        senderGuild = GetGuildInfo("player") or "Unknown",
+        
+        -- Payload
+        kosCount = #kosEntries,
+        kosData = serializeKosEntries(kosEntries),
+        
+        -- TODO: Add guild sync data in future
+        guildCount = 0,
+        guildData = {},
+    }
+end
+
+-- Process received sync message
+function NetworkSync:ReceiveSyncMessage(message, sender, distribution)
+    if not message or not sender then
+        return false
+    end
+
+    -- Validate message version
+    if message.version ~= SYNC_MESSAGE_VERSION then
+        addon.Print(string.format("SpyEnhancement: Sync message from %s has incompatible version %d", 
+            sender, message.version or 0))
+        return false
+    end
+
+    local db = getDB()
+    local receivedCount = 0
+    local mergedCount = 0
+
+    -- Process received KoS entries (union strategy)
+    if message.kosData and #message.kosData > 0 then
+        local entries = deserializeKosEntries(message.kosData, sender)
+        
+        for _, entry in ipairs(entries) do
+            local key = getNormalizedKey(entry.playerName, entry.realm)
+            
+            -- Union strategy: only add if not already present (locally or synced)
+            if not db.kosPersonal[key] and not db.kosSynced[key] then
+                db.kosSynced[key] = entry
+                mergedCount = mergedCount + 1
+            end
+            
+            receivedCount = receivedCount + 1
+        end
+    end
+
+    -- Update sync state
+    if not db.syncState.syncedWith then
+        db.syncState.syncedWith = {}
+    end
+    
+    -- Track who we synced with
+    local alreadySynced = false
+    for _, guildmate in ipairs(db.syncState.syncedWith) do
+        if guildmate == sender then
+            alreadySynced = true
+            break
+        end
+    end
+    if not alreadySynced then
+        table.insert(db.syncState.syncedWith, sender)
+    end
+
+    if options.showSyncNotifications then
+        addon.Print(string.format("SpyEnhancement: Synced with %s - received %d, merged %d entries",
+            sender, receivedCount, mergedCount))
+    end
+
+    return true
+end
+
+-- Send sync message to guild (requires AceComm)
+function NetworkSync:BroadcastKoS()
+    if not aceCommAvailable then
+        addon.Print("SpyEnhancement: AceComm not available, cannot broadcast")
+        return false
+    end
+
+    local aceComm = getAceComm()
+    if not aceComm then
+        return false
+    end
+
+    -- Get all active KoS entries to broadcast
+    local entries = KoSSync:GetAll()
+    if #entries == 0 then
+        addon.Print("SpyEnhancement: No KoS entries to broadcast")
+        return false
+    end
+
+    -- Create sync message
+    local message = createSyncMessage(entries)
+    
+    -- Serialize to string for transmission
+    local AceSerializer = LibStub:GetLibrary("AceSerializer-3.0", true)
+    if not AceSerializer then
+        addon.Print("SpyEnhancement: AceSerializer not available")
+        return false
+    end
+
+    local serialized = AceSerializer:Serialize(message)
+    if not serialized then
+        addon.Print("SpyEnhancement: Failed to serialize KoS data")
+        return false
+    end
+
+    -- Send to guild
+    local channel = SYNC_CHANNEL_PREFIX .. ":" .. ADDON_NAME
+    aceComm:SendCommMessage(channel, serialized, "GUILD", nil, "ALERT")
+
+    addon.Print(string.format("SpyEnhancement: Broadcasted %d KoS entries to guild", #entries))
     
     local db = getDB()
     db.syncState.lastSyncTime = time()
     
-    -- TODO: Phase 4 - Implement AceComm-based sync with guildies
-    -- For now, just show stats
-    local stats = self:GetStats()
-    addon.Print(string.format("KoS Status: %d active (personal: %d, synced: %d, rejected: %d)",
-        stats.active, stats.personal, stats.synced, stats.rejected))
+    return true
+end
+
+-- Setup AceComm message receiver
+function NetworkSync:RegisterMessageHandler()
+    if not aceCommAvailable then
+        return false
+    end
+
+    local aceComm = getAceComm()
+    if not aceComm then
+        return false
+    end
+
+    local AceSerializer = LibStub:GetLibrary("AceSerializer-3.0", true)
+    if not AceSerializer then
+        return false
+    end
+
+    local channel = SYNC_CHANNEL_PREFIX .. ":" .. ADDON_NAME
+
+    aceComm:RegisterComm(channel, function(prefix, serialized, distribution, sender)
+        if sender == UnitName("player") then
+            return  -- Ignore our own broadcasts
+        end
+
+        local success, message = AceSerializer:Deserialize(serialized)
+        if not success then
+            addon.Print(string.format("SpyEnhancement: Failed to deserialize message from %s", sender))
+            return
+        end
+
+        NetworkSync:ReceiveSyncMessage(message, sender, distribution)
+    end)
+
+    addon.Print("SpyEnhancement: Message handler registered")
+    return true
+end
+
+-- Get stats on network sync
+function NetworkSync:GetStats()
+    local db = getDB()
+    local syncedWith = 0
+    if db.syncState.syncedWith then
+        syncedWith = #db.syncState.syncedWith
+    end
+
+    return {
+        lastSyncTime = db.syncState.lastSyncTime,
+        syncedWith = syncedWith,
+        syncedWithList = db.syncState.syncedWith or {},
+    }
+end
+
+-- ============================================================================
+-- MANUAL SYNC WITH NETWORK SUPPORT (Phase 1 + Phase 4)
+-- ============================================================================
+
+function KoSSync:ManualSync()
+    if not options.networkSyncEnabled then
+        addon.Print("SpyEnhancement: Network sync is disabled")
+        return false
+    end
+
+    if aceCommAvailable then
+        addon.Print("SpyEnhancement: Broadcasting KoS to guild...")
+        return NetworkSync:BroadcastKoS()
+    else
+        addon.Print("SpyEnhancement: Network sync not available (AceComm not found)")
+        local stats = self:GetStats()
+        addon.Print(string.format("KoS Status: %d active (personal: %d, synced: %d, rejected: %d)",
+            stats.active, stats.personal, stats.synced, stats.rejected))
+        return false
+    end
 end
 
 -- ============================================================================
@@ -713,7 +957,27 @@ function SpyEnhancement:OnEnable()
     end
 
     spyAvailable = true
-    addon.Print("SpyEnhancement: Loaded (Phase 1: KoS Sync + Phase 2: Guild Tagging + Phase 3: Cyrillic)")
+    
+    -- Check for AceComm (Phase 4)
+    local aceComm = getAceComm()
+    local aceSerializer = LibStub:GetLibrary("AceSerializer-3.0", true)
+    if aceComm and aceSerializer then
+        aceCommAvailable = true
+        addon.Print("SpyEnhancement: Loaded (Phase 1-4: KoS Sync + Guild Tagging + Cyrillic + Network)")
+        
+        -- Register message handler for network sync
+        if options.networkSyncEnabled then
+            NetworkSync:RegisterMessageHandler()
+        end
+    else
+        addon.Print("SpyEnhancement: Loaded (Phase 1-3: KoS Sync + Guild Tagging + Cyrillic)")
+        if not aceComm then
+            addon.Print("  Note: AceComm-3.0 not available - network sync disabled")
+        end
+        if not aceSerializer then
+            addon.Print("  Note: AceSerializer-3.0 not available - network sync disabled")
+        end
+    end
 
     -- Initialize database
     getDB()
@@ -782,6 +1046,25 @@ function SpyEnhancement:GetSpyOptionsTable()
                 end,
                 order = 31,
             },
+            phase4Header = {
+                type = "header",
+                name = "Phase 4: Network Sync " .. (aceCommAvailable and "(ACTIVE)" or "(UNAVAILABLE)"),
+                order = 40,
+            },
+            networkStats = {
+                type = "description",
+                name = function()
+                    if aceCommAvailable then
+                        local stats = NetworkSync:GetStats()
+                        return string.format("Status: Connected | Last Sync: %s | Synced With: %d guildies",
+                            stats.lastSyncTime > 0 and date("%H:%M:%S", stats.lastSyncTime) or "Never",
+                            stats.syncedWith)
+                    else
+                        return "Status: AceComm/AceSerializer not available"
+                    end
+                end,
+                order = 41,
+            },
         }
     }
 end
@@ -801,13 +1084,32 @@ function SpyEnhancement:HandleCommand(args)
     end
 
     if subcommand == "status" then
-        local stats = KoSSync:GetStats()
+        local kosStats = KoSSync:GetStats()
         addon.Print("SpyEnhancement Status:")
-        addon.Print(string.format("  Active KoS: %d", stats.active))
-        addon.Print(string.format("  Personal: %d | Synced: %d | Rejected: %d", 
-            stats.personal, stats.synced, stats.rejected))
-        addon.Print(string.format("  Last sync: %s", 
-            stats.lastSync > 0 and date("%Y-%m-%d %H:%M:%S", stats.lastSync) or "Never"))
+        addon.Print("")
+        addon.Print("  KoS Sync:")
+        addon.Print(string.format("    Active: %d", kosStats.active))
+        addon.Print(string.format("    Personal: %d | Synced: %d | Rejected: %d", 
+            kosStats.personal, kosStats.synced, kosStats.rejected))
+        
+        if aceCommAvailable then
+            local networkStats = NetworkSync:GetStats()
+            addon.Print("")
+            addon.Print("  Network Sync:")
+            addon.Print(string.format("    Status: Connected (AceComm available)")
+            addon.Print(string.format("    Last broadcast: %s",
+                networkStats.lastSyncTime > 0 and date("%Y-%m-%d %H:%M:%S", networkStats.lastSyncTime) or "Never"))
+            addon.Print(string.format("    Synced with: %d guildies", networkStats.syncedWith))
+            if networkStats.syncedWith > 0 then
+                for _, guildie in ipairs(networkStats.syncedWithList) do
+                    addon.Print(string.format("      - %s", guildie))
+                end
+            end
+        else
+            addon.Print("")
+            addon.Print("  Network Sync:")
+            addon.Print("    Status: Unavailable (AceComm/AceSerializer not found)")
+        end
         return
     end
 
@@ -1036,11 +1338,11 @@ function SpyEnhancement:HandleCommand(args)
 end
 
 function SpyEnhancement:PrintHelp()
-    addon.Print("SpyEnhancement Commands (Phase 1: KoS Sync + Phase 2: Guild Tagging + Phase 3: Cyrillic):")
+    addon.Print("SpyEnhancement Commands (Phase 1-4: KoS Sync + Guild Tagging + Cyrillic + Network):")
     addon.Print("")
     addon.Print("  KoS Commands:")
-    addon.Print("    /saboton spyenhancement status           - Show KoS statistics")
-    addon.Print("    /saboton spyenhancement sync             - Manual sync with guildies")
+    addon.Print("    /saboton spyenhancement status           - Show detailed status (KoS + Network)")
+    addon.Print("    /saboton spyenhancement sync             - Manual broadcast KoS to guild (network)")
     addon.Print("    /saboton spyenhancement add <name>       - Add player to personal KoS")
     addon.Print("    /saboton spyenhancement remove <name>    - Remove from personal KoS")
     addon.Print("    /saboton spyenhancement list             - List all KoS entries")
