@@ -2,8 +2,8 @@ local ADDON_NAME, addon = ...
 
 -- SpyEnhancement module: Integrates with Spy addon for guild-wide enhancements
 -- Phase 1: Core KoS (Kill On Sight) Sync system
--- Phase 2: Guild tagging system (IN PROGRESS)
--- TODO: Phase 3: Cyrillic nationality detection
+-- Phase 2: Guild tagging system
+-- Phase 3: Cyrillic nationality detection (IN PROGRESS)
 
 local SpyEnhancement = {}
 local spyAvailable = false
@@ -487,6 +487,167 @@ function GuildTag:GetStats()
 end
 
 -- ============================================================================
+-- PHASE 3: CYRILLIC NATIONALITY DETECTION
+-- ============================================================================
+
+-- Cyrillic detection subsystem (Phase 3)
+local CyrillicDetector = {}
+
+-- Character sets for Russian and Ukrainian
+-- Based on Unicode Cyrillic block and language-specific characters
+local RUSSIAN_SPECIFIC = {
+    ['Ё'] = true, ['ё'] = true,  -- Russian yo
+    ['Ы'] = true, ['ы'] = true,  -- Russian y
+    ['Э'] = true, ['э'] = true,  -- Russian e (backwards)
+}
+
+local UKRAINIAN_SPECIFIC = {
+    ['Ї'] = true, ['ї'] = true,  -- Ukrainian yi
+    ['Є'] = true, ['є'] = true,  -- Ukrainian ye
+    ['Ґ'] = true, ['ґ'] = true,  -- Ukrainian ge
+    ['І'] = true, ['і'] = true,  -- Ukrainian i
+}
+
+-- Common Cyrillic characters (shared between Russian and Ukrainian)
+local COMMON_CYRILLIC = {
+    ['А'] = true, ['а'] = true, ['Б'] = true, ['б'] = true, ['В'] = true, ['в'] = true,
+    ['Г'] = true, ['г'] = true, ['Д'] = true, ['д'] = true, ['Е'] = true, ['е'] = true,
+    ['Ж'] = true, ['ж'] = true, ['З'] = true, ['з'] = true, ['И'] = true, ['и'] = true,
+    ['Й'] = true, ['й'] = true, ['К'] = true, ['к'] = true, ['Л'] = true, ['л'] = true,
+    ['М'] = true, ['м'] = true, ['Н'] = true, ['н'] = true, ['О'] = true, ['о'] = true,
+    ['П'] = true, ['п'] = true, ['Р'] = true, ['р'] = true, ['С'] = true, ['с'] = true,
+    ['Т'] = true, ['т'] = true, ['У'] = true, ['у'] = true, ['Ф'] = true, ['ф'] = true,
+    ['Х'] = true, ['х'] = true, ['Ц'] = true, ['ц'] = true, ['Ч'] = true, ['ч'] = true,
+    ['Ш'] = true, ['ш'] = true, ['Щ'] = true, ['щ'] = true, ['Ъ'] = true, ['ъ'] = true,
+    ['Ь'] = true, ['ь'] = true, ['Ю'] = true, ['ю'] = true,
+}
+
+-- Detect nationality of player name based on Cyrillic characters
+-- Returns: "russian", "ukrainian", "unclear", or nil (no Cyrillic)
+function CyrillicDetector:Detect(playerName)
+    if not playerName or playerName == "" then
+        return nil
+    end
+
+    -- Check cache first
+    local db = getDB()
+    if db.cyrillicCache[playerName] then
+        return db.cyrillicCache[playerName]
+    end
+
+    local russianScore = 0
+    local ukrainianScore = 0
+    local cyrillicCount = 0
+
+    -- Scan each character in the name
+    for i = 1, #playerName do
+        local char = playerName:sub(i, i)
+
+        -- Check for Russian-specific
+        if RUSSIAN_SPECIFIC[char] then
+            russianScore = russianScore + 1
+            cyrillicCount = cyrillicCount + 1
+        end
+
+        -- Check for Ukrainian-specific
+        if UKRAINIAN_SPECIFIC[char] then
+            ukrainianScore = ukrainianScore + 1
+            cyrillicCount = cyrillicCount + 1
+        end
+
+        -- Check for common Cyrillic
+        if COMMON_CYRILLIC[char] then
+            cyrillicCount = cyrillicCount + 1
+        end
+    end
+
+    -- If no Cyrillic found, return nil
+    if cyrillicCount == 0 then
+        return nil
+    end
+
+    -- Determine nationality based on scores
+    local result
+    if russianScore > ukrainianScore then
+        result = "russian"
+    elseif ukrainianScore > russianScore then
+        result = "ukrainian"
+    else
+        -- Equal scores or only common characters = unclear
+        result = "unclear"
+    end
+
+    -- Cache the result
+    db.cyrillicCache[playerName] = result
+    return result
+end
+
+-- Get cached nationality result
+function CyrillicDetector:GetCached(playerName)
+    if not playerName then return nil end
+    local db = getDB()
+    return db.cyrillicCache[playerName]
+end
+
+-- Clear cache for a specific player
+function CyrillicDetector:ClearCache(playerName)
+    if not playerName then return end
+    local db = getDB()
+    db.cyrillicCache[playerName] = nil
+end
+
+-- Clear all cached results
+function CyrillicDetector:ClearAllCache()
+    local db = getDB()
+    db.cyrillicCache = {}
+end
+
+-- Get stats on Cyrillic players detected
+function CyrillicDetector:GetStats()
+    local db = getDB()
+    local russianCount = 0
+    local ukrainianCount = 0
+    local unclearCount = 0
+
+    for _, nationality in pairs(db.cyrillicCache) do
+        if nationality == "russian" then
+            russianCount = russianCount + 1
+        elseif nationality == "ukrainian" then
+            ukrainianCount = ukrainianCount + 1
+        elseif nationality == "unclear" then
+            unclearCount = unclearCount + 1
+        end
+    end
+
+    return {
+        russian = russianCount,
+        ukrainian = ukrainianCount,
+        unclear = unclearCount,
+        total = russianCount + ukrainianCount + unclearCount,
+    }
+end
+
+-- Batch detect players (e.g., from KoS list)
+function CyrillicDetector:DetectBatch(playerNames)
+    if not playerNames or #playerNames == 0 then
+        return {}
+    end
+
+    local results = {}
+    for _, playerName in ipairs(playerNames) do
+        local nationality = self:Detect(playerName)
+        if nationality then
+            if not results[nationality] then
+                results[nationality] = {}
+            end
+            table.insert(results[nationality], playerName)
+        end
+    end
+
+    return results
+end
+
+-- ============================================================================
 -- MANUAL SYNC (Phase 1 only - no network yet)
 -- ============================================================================
 
@@ -552,7 +713,7 @@ function SpyEnhancement:OnEnable()
     end
 
     spyAvailable = true
-    addon.Print("SpyEnhancement: Loaded (Phase 1: KoS Sync + Phase 2: Guild Tagging)")
+    addon.Print("SpyEnhancement: Loaded (Phase 1: KoS Sync + Phase 2: Guild Tagging + Phase 3: Cyrillic)")
 
     -- Initialize database
     getDB()
@@ -607,10 +768,19 @@ function SpyEnhancement:GetSpyOptionsTable()
                 end,
                 order = 21,
             },
-            phase3Info = {
+            phase3Header = {
                 type = "header",
-                name = "Phase 3: Cyrillic Detection (Coming Soon)",
+                name = "Phase 3: Cyrillic Detection (ACTIVE)",
                 order = 30,
+            },
+            cyrillicStats = {
+                type = "description",
+                name = function()
+                    local stats = CyrillicDetector:GetStats()
+                    return string.format("Russian (🇷🇺): %d | Ukrainian (🇺🇦): %d | Unclear (❓): %d | Cached: %d",
+                        stats.russian, stats.ukrainian, stats.unclear, stats.total)
+                end,
+                order = 31,
             },
         }
     }
@@ -792,11 +962,81 @@ function SpyEnhancement:HandleCommand(args)
         return
     end
 
+    -- ========================================================================
+    -- CYRILLIC DETECTION COMMANDS (Phase 3)
+    -- ========================================================================
+
+    if subcommand == "detect" then
+        local playerName = string.match(rest, "^(%S+)")
+        if not playerName then
+            addon.Print("Usage: /saboton spyenhancement detect <name>")
+            return
+        end
+
+        local result = CyrillicDetector:Detect(playerName)
+        if result == nil then
+            addon.Print(string.format("%s: No Cyrillic characters detected", playerName))
+        elseif result == "russian" then
+            addon.Print(string.format("%s: Likely Russian 🇷🇺", playerName))
+        elseif result == "ukrainian" then
+            addon.Print(string.format("%s: Likely Ukrainian 🇺🇦", playerName))
+        elseif result == "unclear" then
+            addon.Print(string.format("%s: Unclear/Mixed Cyrillic ❓", playerName))
+        end
+        return
+    end
+
+    if subcommand == "cyrillicstats" then
+        local stats = CyrillicDetector:GetStats()
+        addon.Print("Cyrillic Detection Statistics:")
+        addon.Print(string.format("  Russian (🇷🇺): %d", stats.russian))
+        addon.Print(string.format("  Ukrainian (🇺🇦): %d", stats.ukrainian))
+        addon.Print(string.format("  Unclear (❓): %d", stats.unclear))
+        addon.Print(string.format("  Total cached: %d", stats.total))
+        return
+    end
+
+    if subcommand == "clearcyrillicache" then
+        CyrillicDetector:ClearAllCache()
+        addon.Print("SpyEnhancement: Cyrillic cache cleared")
+        return
+    end
+
+    if subcommand == "detectkos" then
+        -- Detect all KoS entries
+        local entries = KoSSync:GetAll()
+        if #entries == 0 then
+            addon.Print("No KoS entries to scan")
+            return
+        end
+
+        addon.Print(string.format("Scanning %d KoS entries for Cyrillic...", #entries))
+        local batch = {}
+        for _, entry in ipairs(entries) do
+            table.insert(batch, entry.playerName)
+        end
+
+        local results = CyrillicDetector:DetectBatch(batch)
+        for nationality, players in pairs(results) do
+            local flag = nationality == "russian" and "🇷🇺" or nationality == "ukrainian" and "🇺🇦" or "❓"
+            addon.Print(string.format("%s (%s): %d players", flag, nationality, #players))
+            for i, playerName in ipairs(players) do
+                if i <= 5 then  -- Show first 5
+                    addon.Print(string.format("  - %s", playerName))
+                end
+            end
+            if #players > 5 then
+                addon.Print(string.format("  ... and %d more", #players - 5))
+            end
+        end
+        return
+    end
+
     addon.Print("Unknown command. Use '/saboton spyenhancement help'")
 end
 
 function SpyEnhancement:PrintHelp()
-    addon.Print("SpyEnhancement Commands (Phase 1: KoS Sync + Phase 2: Guild Tagging):")
+    addon.Print("SpyEnhancement Commands (Phase 1: KoS Sync + Phase 2: Guild Tagging + Phase 3: Cyrillic):")
     addon.Print("")
     addon.Print("  KoS Commands:")
     addon.Print("    /saboton spyenhancement status           - Show KoS statistics")
@@ -815,7 +1055,13 @@ function SpyEnhancement:PrintHelp()
     addon.Print("    /saboton spyenhancement rejectguild <name>   - Reject guild locally")
     addon.Print("    /saboton spyenhancement acceptguild <name>   - Re-accept guild")
     addon.Print("")
-    addon.Print("    /saboton spyenhancement help             - Show this help")
+    addon.Print("  Cyrillic Detection Commands (Phase 3):")
+    addon.Print("    /saboton spyenhancement detect <name>        - Detect player nationality (🇷🇺/🇺🇦/❓)")
+    addon.Print("    /saboton spyenhancement cyrillicstats         - Show Cyrillic detection statistics")
+    addon.Print("    /saboton spyenhancement detectkos             - Scan all KoS entries for Cyrillic")
+    addon.Print("    /saboton spyenhancement clearcyrillicache     - Clear cached results")
+    addon.Print("")
+    addon.Print("    /saboton spyenhancement help                  - Show this help")
 end
 
 addon.RegisterModule("spyenhancement", SpyEnhancement)
