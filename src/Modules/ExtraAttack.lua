@@ -12,7 +12,7 @@ local ADDON_NAME, addon = ...
 -- engine event PLAYER_SWING(swingDuration, swingType), for every auto attack, with plain
 -- (non-secret) numbers. Extra attacks are delivered as main-hand swings, so a MainHand
 -- PLAYER_SWING that arrives far earlier than the current swing duration is treated as an
--- extra attack. This is a timing heuristic and does not identify the triggering spell.
+-- extra attack. Windfury spell procs are detected separately through SPELL_UPDATE_COOLDOWN.
 local ExtraAttack = {}
 
 -- Sound choices selectable from the options dropdown; "key" is what soundKey stores.
@@ -73,6 +73,11 @@ local mhSwingDuration = nil
 -- after the last hit tells us the burst is complete and how big it was.
 local burstHits = 0
 local burstSettleTimer = nil
+
+local WINDFURY_SPELL_HITS = {
+    [10608] = 1,   -- Windfury Totem
+    [439440] = 2,  -- Windfury Weapon
+}
 
 local function findSoundOption(key)
     for _, soundOption in ipairs(SOUND_OPTIONS) do
@@ -303,6 +308,26 @@ local function handleSwing(swingDuration, swingType)
     lastMHSwingAt = now
 end
 
+local function handleSpellCooldown(spellID)
+    if issecretvalue(spellID) or not enabled then
+        return
+    end
+
+    local hits = WINDFURY_SPELL_HITS[spellID]
+    if not hits then
+        return
+    end
+
+    for _ = 1, hits do
+        burstHits = burstHits + 1
+        handleProc()
+    end
+
+    if DEBUG then
+        addon.Print("Windfury spell " .. spellID .. " detected: " .. hits .. " extra attack hit(s).")
+    end
+end
+
 local function printStatus()
     addon.Print("Enabled: " .. (enabled and "yes" or "no"))
     addon.Print("Sound: " .. (soundEnabled and findSoundOption(soundKey).label or "off"))
@@ -464,11 +489,17 @@ function ExtraAttack:OnEnable()
 
     self.frame = CreateFrame("Frame")
     self.frame:RegisterEvent("PLAYER_SWING")
+    self.frame:RegisterEvent("SPELL_UPDATE_COOLDOWN")
     self.frame:RegisterEvent("PLAYER_REGEN_DISABLED")
     self.frame:RegisterEvent("PLAYER_REGEN_ENABLED")
     self.frame:SetScript("OnEvent", function(_, event, ...)
         if event == "PLAYER_SWING" then
             handleSwing(...)
+            return
+        end
+
+        if event == "SPELL_UPDATE_COOLDOWN" then
+            handleSpellCooldown(...)
             return
         end
 

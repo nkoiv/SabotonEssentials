@@ -14,7 +14,7 @@
 local GatheringTimer = {}
 
 local DEBUG = false
-local enabled = true
+local enabled = false
 local locked = true
 local barWidth = 220
 local barHeight = 18
@@ -307,7 +307,7 @@ function GatheringTimer:GetOptionsSchema()
     local opts = {
         { type = "checkbox", key = "enabled", label = "Enable Gathering Timer",
           tooltip = "Master switch for loot detection and the timer bars.",
-          default = true, get = function() return enabled end, set = function(v) enabled = v end },
+          default = false, get = function() return enabled end, set = function(v) enabled = v end },
         { type = "checkbox", key = "locked", label = "Lock frame position",
           tooltip = "Uncheck to drag the timer bars around with the left mouse button (out of combat).",
           default = true, get = function() return locked end,

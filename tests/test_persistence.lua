@@ -89,6 +89,7 @@ local function said(fragment)
 end
 
 local addon = session(nil)
+slash("gather enable")
 slash("gather add Mystic Herb herb 60 120")
 slash("gather add Another Herb herb 70 140")
 slash("gather toggle Another Herb")
