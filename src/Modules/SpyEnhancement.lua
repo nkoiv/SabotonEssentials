@@ -6,6 +6,7 @@ local sync
 local settingsRestored = false
 local initializationFrame
 local pendingLegacyData
+local hookedSpy
 
 local options = {
     enabled = true,
@@ -159,7 +160,13 @@ local function importsRestricted()
             and C_RestrictedActions.IsAddOnRestrictionActive(chat))
 end
 
-local function updateSpyKOSPlayer(name, add, reason)
+local function refreshSpyLists()
+    if type(spy.RegenerateKOSGuildList) == "function" then spy:RegenerateKOSGuildList() end
+    if type(spy.RefreshCurrentList) == "function" then spy:RefreshCurrentList() end
+    if SpyStats and type(SpyStats.Recalulate) == "function" then SpyStats:Recalulate() end
+end
+
+local function updateSpyKOSPlayer(name, add, reason, replaceReason)
     if importsRestricted() then return false end
     local share = spy.db and spy.db.profile and spy.db.profile.ShareKOSBetweenCharacters
     if share and type(spy.RegenerateKOSCentralList) ~= "function" then
@@ -181,13 +188,12 @@ local function updateSpyKOSPlayer(name, add, reason)
     spy:RemoveIgnoreData(name)
     data.kos = 1
     -- Any existing non-empty reason wins, whether written locally or imported earlier.
-    if reason and (data.reason == nil or (type(data.reason) == "table" and next(data.reason) == nil)) then
+    if reason and (data.reason == nil or (type(data.reason) == "table" and next(data.reason) == nil)
+        or (replaceReason and data.reason == replaceReason)) then
         data.reason = reason
     end
     if share then spy:RegenerateKOSCentralList(name) end
-    if type(spy.RegenerateKOSGuildList) == "function" then spy:RegenerateKOSGuildList() end
-    if type(spy.RefreshCurrentList) == "function" then spy:RefreshCurrentList() end
-    if SpyStats and type(SpyStats.Recalulate) == "function" then SpyStats:Recalulate() end
+    refreshSpyLists()
     return true
 end
 
@@ -305,12 +311,101 @@ local function listBookkeeping(kind)
     local entry = entries[key]
     if type(entry.imported) ~= "table" then entry.imported = {} end
     if type(entry.suppressed) ~= "table" then entry.suppressed = {} end
+    if type(entry.reasons) ~= "table" then entry.reasons = {} end
+    if type(entry.localEntries) ~= "table" then entry.localEntries = {} end
     return entry
+end
+
+local function sameReason(left, right)
+    if type(left) ~= "table" or type(right) ~= "table" then return false end
+    for label, value in pairs(left) do if right[label] ~= value then return false end end
+    for label, value in pairs(right) do if left[label] ~= value then return false end end
+    return true
+end
+
+local function importedPlayers()
+    local book, present = listBookkeeping("P"), {}
+    for name, added in pairs(getSpyPlayerList()) do
+        local key = type(name) == "string" and recordKey("P\t" .. name)
+        if key then
+            present[key] = name
+            local imported = book.imported[key]
+            if imported == true then
+                book.imported[key] = added
+            elseif imported and imported ~= added then
+                -- A later explicit re-add belongs to the player, not the old import.
+                book.imported[key] = nil
+                book.localEntries[key] = added
+            end
+        end
+    end
+    local entries = {}
+    for key in pairs(book.imported) do
+        if present[key] then
+            entries[#entries + 1] = { key = key, name = present[key] }
+        else
+            book.imported[key], book.suppressed[key] = nil, true
+            book.reasons[key] = nil
+        end
+    end
+    for key in pairs(book.reasons) do
+        if not present[key] then book.reasons[key] = nil end
+    end
+    for key in pairs(book.localEntries) do
+        if not present[key] then book.localEntries[key] = nil end
+    end
+    table.sort(entries, function(a, b) return a.key < b.key end)
+    return entries
+end
+
+local function suspectedImports()
+    local book, entries = listBookkeeping("P"), {}
+    local function missing(value)
+        if issecretvalue and issecretvalue(value) then return false end
+        return value == nil or value == ""
+    end
+    for name, added in pairs(getSpyPlayerList()) do
+        local key = type(name) == "string" and recordKey("P\t" .. name)
+        local data = SpyPerCharDB.PlayerData[name]
+        if key and not book.imported[key] and book.localEntries[key] ~= added
+            and not (issecretvalue and issecretvalue(data))
+            and (data == nil or (type(data) == "table"
+                and missing(data.zone) and missing(data.level) and missing(data.class))) then
+            entries[#entries + 1] = { key = key, name = name }
+        end
+    end
+    table.sort(entries, function(a, b) return a.key < b.key end)
+    return entries
+end
+
+local function prepareImportedReason(name, key, reason, newMember)
+    local book = listBookkeeping("P")
+    local data = SpyPerCharDB.PlayerData[name]
+    local current = data and data.reason
+    local tracked = book.reasons[key]
+    local placeholder = tracked and tracked.wire == "" and sameReason(current, tracked.display)
+    if current ~= nil and not (type(current) == "table" and next(current) == nil) and not placeholder then
+        return nil
+    end
+    if not reason and (not newMember or placeholder) then return nil end
+    local label = otherReasonLabel()
+    if not label then return nil, nil, nil, "Spy's localized Other reason label is unavailable." end
+    local wire, err = encodeReason(reason)
+    if not wire then return nil, nil, nil, err end
+    local texts = {}
+    for key, value in pairs(reason or {}) do
+        texts[#texts + 1] = value == true and key or value
+    end
+    table.sort(texts)
+    local text = #texts > 0 and table.concat(texts, ", ") or "imported KoS (no shared reason)"
+    local display = { [label] = "Guild: " .. text:gsub("|", "||") }
+    return display, { wire = wire, display = { [label] = display[label] } }, placeholder and current or nil
 end
 
 local function localRecords()
     local players, guilds = getSpyPlayerList(), getWatchedGuilds()
     if not players or not guilds then return nil, "Spy's lists are unavailable." end
+    importedPlayers()
     local records, present = {}, {}
     local playerCount, guildCount = 0, 0
     for name in pairs(players) do
@@ -328,7 +423,14 @@ local function localRecords()
         end
         if options.shareKOSReasons then
             local data = SpyPerCharDB.PlayerData[name]
-            local encoded, err = encodeReason(data and data.reason)
+            local reason = data and data.reason
+            local tracked = listBookkeeping("P").reasons[key]
+            local encoded, err
+            if tracked and type(tracked.wire) == "string" and sameReason(reason, tracked.display) then
+                encoded = tracked.wire
+            else
+                encoded, err = encodeReason(reason)
+            end
             if not encoded then return nil, err end
             if encoded ~= "" then record = record .. "\t" .. encoded end
         end
@@ -375,9 +477,11 @@ local function applyRecord(record)
     if present[key] then
         if kind == "P" and reason then
             local actualName = present[key]
-            local data = SpyPerCharDB.PlayerData[actualName]
-            if not data or data.reason == nil or (type(data.reason) == "table" and next(data.reason) == nil) then
-                if not updateSpyKOSPlayer(actualName, false, reason) then return false end
+            local display, tracked, replace, err = prepareImportedReason(actualName, key, reason, false)
+            if err then addon.Print("SpyEnhancement: " .. err) return false end
+            if display then
+                if not updateSpyKOSPlayer(actualName, false, display, replace) then return false end
+                book.reasons[key] = tracked
                 if addon.SaveSettings then addon.SaveSettings() end
             end
         end
@@ -392,11 +496,14 @@ local function applyRecord(record)
         return false
     end
     if kind == "P" then
-        if not updateSpyKOSPlayer(name, true, reason) then return false end
+        local display, tracked, replace, err = prepareImportedReason(name, key, reason, true)
+        if err then addon.Print("SpyEnhancement: " .. err) return false end
+        if not updateSpyKOSPlayer(name, true, display, replace) then return false end
+        book.reasons[key] = tracked
     else
         if not watchedGuild(name, getWatchedGuilds()) then spy:ToggleGuild(name, nil, true) end
     end
-    book.imported[key] = true
+    book.imported[key] = kind == "P" and getSpyPlayerList()[name] or true
     if addon.SaveSettings then addon.SaveSettings() end
     return true, true
 end
@@ -522,23 +629,77 @@ function SpyEnhancement:LoadPersistentState(state)
     end
 end
 
-function SpyEnhancement:GetSyncView()
+function SpyEnhancement:GetSyncView(includeSuspected)
     local ready = spy and getSpyPlayerList() and getWatchedGuilds()
     local progress = sync and sync:GetProgress() or { status = "Spy unavailable", active = false }
     local players, guilds = 0, 0
     for _ in pairs(getSpyPlayerList() or {}) do players = players + 1 end
     for _ in pairs(getWatchedGuilds() or {}) do guilds = guilds + 1 end
     local confirmed = getPersistentState().syncState.lastConfirmedTime
+    local imported = ready and #importedPlayers() or 0
+    local suspected = ready and #suspectedImports() or 0
     return {
         status = not options.networkSyncEnabled and "disabled" or progress.status,
-        summary = string.format("Spy lists: %d KoS players, %d watched guilds.\nLast confirmed exchange: %s",
-            players, guilds, confirmed > 0 and date("%Y-%m-%d %H:%M:%S", confirmed) or "Never"),
+        summary = string.format("Spy lists: %d KoS players (%d imported), %d watched guilds.\nLast confirmed exchange: %s",
+            players, imported, guilds, confirmed > 0 and date("%Y-%m-%d %H:%M:%S", confirmed) or "Never"),
         progress = string.format("%d active exchange(s); %d imported, %d requested names remaining.\n%d peer exchange(s) confirmed in the last initiated round.",
             progress.sessions or 0, progress.received or 0, progress.pending or 0, progress.peers or 0),
         canSync = not not (ready and settingsRestored and options.networkSyncEnabled and not progress.active
             and IsInGuild and IsInGuild()),
         canCancel = progress.active,
+        suspectedImports = suspected,
+        canRemoveImports = not not (ready and settingsRestored
+            and (imported > 0 or (includeSuspected == true and suspected > 0)) and not importsRestricted()
+            and type(spy.RemoveKOSData) == "function"),
     }
+end
+
+function SpyEnhancement:RemoveImportedKOS(includeSuspected)
+    if not spy or not getSpyPlayerList() or not settingsRestored or type(spy.RemoveKOSData) ~= "function" then
+        addon.Print("SpyEnhancement: Spy's KoS removal API is unavailable.")
+        return false
+    end
+    if importsRestricted() then
+        addon.Print("SpyEnhancement: Cannot remove imports during combat/chat restrictions; try again afterward.")
+        return false
+    end
+    local share = spy.db and spy.db.profile and spy.db.profile.ShareKOSBetweenCharacters
+    if share and type(spy.RegenerateKOSCentralList) ~= "function" then
+        addon.Print("SpyEnhancement: Spy's central KoS update API is unavailable; imports were not removed.")
+        return false
+    end
+    if sync then sync:Cancel("imported KoS removed") end
+    local book, removed, suspectedRemoved = listBookkeeping("P"), 0, 0
+    local entries = importedPlayers()
+    if includeSuspected == true then
+        for _, entry in ipairs(suspectedImports()) do
+            entry.suspected = true
+            entries[#entries + 1] = entry
+        end
+    end
+    for _, entry in ipairs(entries) do
+        local data = SpyPerCharDB.PlayerData[entry.name]
+        local reason = data and data.reason
+        local tracked = book.reasons[entry.key]
+        local preserve = not (tracked and sameReason(reason, tracked.display))
+        spy:RemoveKOSData(entry.name)
+        if getSpyPlayerList()[entry.name] or (data and data.kos) then
+            addon.Print("SpyEnhancement: Spy did not remove an imported KoS player; cleanup stopped.")
+            if addon.SaveSettings then addon.SaveSettings() end
+            refreshSpyLists()
+            return false
+        end
+        if data and preserve then data.reason = reason end
+        if share then spy:RegenerateKOSCentralList(entry.name) end
+        book.imported[entry.key], book.reasons[entry.key], book.suppressed[entry.key] = nil, nil, true
+        removed = removed + 1
+        if entry.suspected then suspectedRemoved = suspectedRemoved + 1 end
+    end
+    refreshSpyLists()
+    if addon.SaveSettings then addon.SaveSettings() end
+    addon.Print(string.format("SpyEnhancement: Removed %d imported KoS players (%d suspected legacy entries). Other entries and watched guilds kept. Removed names stay suppressed.",
+        removed, suspectedRemoved))
+    return true
 end
 
 function SpyEnhancement:GetSuppressedImports()
@@ -568,23 +729,40 @@ function SpyEnhancement:AllowSyncImport(key)
     return true
 end
 
+function SpyEnhancement:AllowAllSyncImports()
+    if not spy or not getSpyPlayerList() or not getWatchedGuilds() then return false, 0 end
+    localRecords()
+    local count = 0
+    for _, kind in ipairs({ "P", "G" }) do
+        local suppressed = listBookkeeping(kind).suppressed
+        for key in pairs(suppressed) do
+            suppressed[key] = nil
+            count = count + 1
+        end
+    end
+    if count > 0 and addon.SaveSettings then addon.SaveSettings() end
+    return count > 0, count
+end
+
 function SpyEnhancement:GetOptionsSchema()
     return {
         name = "Spy Enhancement",
         dashboard = {
-            description = "Reconcile Spy lists with v4 guild peers. Enabling sync allows replies/imports. KoS reason sharing is opt-in and includes custom text; incoming reasons only fill empty fields. Guild reasons stay local. Restrictions defer work. Edit lists in Spy.",
-            view = function() return self:GetSyncView() end,
+            description = "Reconcile Spy lists with v4 guild peers. KoS reason sharing is opt-in; incoming reasons preserve your notes. Guild reasons stay local. Remove imported KoS keeps local entries and suppresses removed names. Restrictions defer sync. Edit lists in Spy.",
+            view = function(includeSuspected) return self:GetSyncView(includeSuspected) end,
             suppressed = function() return self:GetSuppressedImports() end,
             allow = function(key) return self:AllowSyncImport(key) end,
+            allowAll = function() return self:AllowAllSyncImports() end,
             sync = function() self:Broadcast() end,
             cancel = function() if sync then sync:Cancel() end end,
+            removeImports = function(includeSuspected) return self:RemoveImportedKOS(includeSuspected) end,
         },
         options = {
             {
                 type = "checkbox",
                 key = "networkSyncEnabled",
                 label = "Enable guild sync",
-                tooltip = "Allows manual sync, replies to guild peers, and additive imports. All peers need v4. Sending and imports wait during combat/chat restrictions. Incoming KoS reasons never replace a non-empty local reason.",
+                tooltip = "Allows manual sync, replies to guild peers, and additive imports. All peers need v4. Sending and imports wait during combat/chat restrictions. Incoming KoS reasons never replace your notes or a previously received real reason.",
                 default = true,
                 get = function() return options.networkSyncEnabled end,
                 set = function(value)
@@ -598,7 +776,7 @@ function SpyEnhancement:GetOptionsSchema()
                 type = "checkbox",
                 key = "shareKOSReasons",
                 label = "Share KoS reasons",
-                tooltip = "Off by default. Share player KoS preset reasons and custom Other text with guild peers, including for names they already have. Does not share guild reasons. Receiving remains enabled; any non-empty receiver reason wins. Changing this cancels pending work so old snapshots cannot leak reasons.",
+                tooltip = "Off by default. Share player KoS preset reasons and custom Other text with guild peers, including for names they already have. Does not share guild reasons. Received text is labeled Guild; existing notes win, except our unchanged names-only placeholder. Changing this cancels pending work so old snapshots cannot leak reasons.",
                 default = false,
                 get = function() return options.shareKOSReasons end,
                 set = function(value)
@@ -625,6 +803,24 @@ local function initializeSpyIntegration()
         or type(SpyPerCharDB.PlayerData) ~= "table"
         or type(spy.AddKOSData) ~= "function" or type(spy.UpdatePlayerStatus) ~= "function"
         or type(spy.RemoveIgnoreData) ~= "function" or type(spy.ToggleGuild) ~= "function" then return false end
+
+    if hookedSpy ~= spy and hooksecurefunc and type(spy.ToggleKOSPlayer) == "function" then
+        hooksecurefunc(spy, "ToggleKOSPlayer", function(_, kos, name)
+            if not settingsRestored or not validName(name) then return end
+            local key = recordKey("P\t" .. name)
+            if not key then return end
+            local book = listBookkeeping("P")
+            -- Explicit Spy UI actions own the membership, even within the same timestamp.
+            if kos and getSpyPlayerList()[name] then
+                book.imported[key], book.suppressed[key] = nil, nil
+                book.localEntries[key] = getSpyPlayerList()[name]
+            elseif not kos and not getSpyPlayerList()[name] and book.imported[key] then
+                book.imported[key], book.reasons[key], book.suppressed[key] = nil, nil, true
+            end
+            if addon.SaveSettings then addon.SaveSettings() end
+        end)
+        hookedSpy = spy
+    end
 
     if not sync then
         sync = addon.GuildSync.New({
@@ -715,7 +911,7 @@ local function printStatus()
         #syncState.syncedWith))
     addon.Print("Guild sync: " .. (sync and sync:GetStatus() or "Spy unavailable"))
     addon.Print("KoS reason sharing: " .. (options.shareKOSReasons and "on" or "off")
-        .. " (outgoing); incoming reasons only fill empty fields.")
+        .. " (outgoing); incoming reasons fill empty fields or unchanged generated placeholders.")
     addon.Print(string.format("Cyrillic cache: %d Russian, %d Ukrainian, %d unclear.",
         counts.russian, counts.ukrainian, counts.unclear))
 end
@@ -781,12 +977,14 @@ function SpyEnhancement:HandleCommand(message)
     command = string.lower(command or "")
 
     if command == "" or command == "help" then
-        addon.Print("SpyEnhancement: options | sync | cancel | status | debug | allowsync [player|guild] <name> | detect [player|guild] <name> | detectkos | detectguilds | cyrillicstats | clearcyrillicache")
+        addon.Print("SpyEnhancement: options | sync | cancel | removeimports | status | debug | allowsync [player|guild] <name> | detect [player|guild] <name> | detectkos | detectguilds | cyrillicstats | clearcyrillicache")
     elseif command == "options" then
         if addon.modules and addon.modules.options then addon.modules.options:HandleCommand("spyenhancement")
         else addon.Print("SpyEnhancement: Options are unavailable.") end
     elseif command == "sync" then
         self:Broadcast()
+    elseif command == "removeimports" then
+        self:RemoveImportedKOS()
     elseif command == "debug" then
         if sync then sync:SetDebug(not sync.debug)
         else addon.Print("SpyEnhancement: Sync debug unavailable; Spy is not ready.") end

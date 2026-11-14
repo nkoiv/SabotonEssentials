@@ -1,5 +1,23 @@
 # Saboton Essentials - Changelog
 
+## [0.3.2-beta.2] - 2026-11-14
+
+- Add **Allow all** to the Spy Enhancement dashboard to re-enable all suppressed player and guild imports at once; names return only on a later sync.
+- Add coverage for the bulk action in both modern Settings and fallback dashboard UI, and for clearing persisted suppression state.
+
+## [0.3.2-beta] - 2026-11-14
+
+- Track each rank's Windfury Totem and Windfury Weapon spell IDs for extra-attack sounds and combo counts.
+- Add an experimental, off-by-default option to count Seal of Command spell updates as extra attacks; verify the reported proc IDs in game.
+- Add regression coverage for Windfury ranks and the optional Seal of Command detection.
+
+## [0.3.1] - 2026-11-14
+
+- Add an off-by-default, one-use **Include suspected old imports** checkbox with candidate count and warning. Optionally clean up untracked entries missing zone, level, and class; these can also be local name-only entries. Preserve observed explicit local additions across reloads, recheck metadata at removal, preserve notes, and suppress removed candidates.
+- Add **Remove imported KoS** to both dashboards and `/saboton spyenhancement removeimports`. Use saved import provenance, not description text; preserve local memberships, private reasons, learned metadata, and watched guilds. Cancel pending sync and suppress removed names. Honor Spy's cross-character removal rules and local combat/chat restrictions.
+- Display newly received reasons as `Guild: description` using Spy's localized Other field. Add an identifiable names-only placeholder that can later be filled by a shared reason; local edits and real existing reasons always win. Retain original wire content separately to avoid prefix growth or oversized forwarded display text.
+- Show imported-player counts, retain cleanup compatibility with older tracked imports, recognize explicit re-adds with changed timestamps, and test cleanup/reload/suppression, modern/fallback controls, localized Spy reason rendering, forwarding, and in-place local reason edits.
+
 ## [0.3.0-beta.6] - 2026-11-14
 
 - Add **Share KoS reasons**, off by default, to modern/fallback options. Opted-in senders share player preset reasons and custom Other text; guild reasons remain local. Receiving does not require enabling outbound sharing.

@@ -12,8 +12,18 @@
 - `0.3.0-beta.6`: opt-in player KoS reasons, local-wins reason collisions,
   content fingerprints, and bounded continuation chunks over incompatible v4.
   Update both clients; reason transfer still needs in-game validation.
+- `0.3.1`: tracked-import cleanup, opt-in suspected legacy cleanup, Guild-labeled
+  native reason display, and names-only placeholders. All ten Lua suites pass,
+  including cleanup/reload and rendering tests; live verification remains pending.
+  Existing beta.6 ZIPs do not include these changes. The v4 protocol is unchanged.
+- `0.3.2-beta`: track each Windfury Totem and Windfury Weapon rank spell for
+  extra-attack sounds, and add opt-in experimental Seal of Command proc detection.
+- `0.3.2-beta.2`: add **Allow all** to clear player and guild import suppressions
+  in one action. Allowed names remain absent until the next sync.
 - Still unverified in-game: twenty-client load, restriction transitions,
   disconnect/reconnect recovery, and modern/fallback dashboard layout.
+- The Windfury rank and Seal of Command spell IDs still require in-game proc
+  verification; Seal detection is disabled by default.
 - User-facing setup, status meanings, and diagnostic steps are in the
   [README sync guide](../README.md#sync-quick-start-and-recovery).
 
@@ -40,7 +50,8 @@ imports, suppression, settings, and commands.
   saved setting, off by default, controlling outbound reasons only. Incoming
   reasons fill absent/empty reason tables; any non-empty receiver reason wins
   unchanged, including local edits during a transfer and previously imported
-  reasons. No reason merging, replacement, or deletion. Guild reasons and other
+  reasons. Only an unchanged generated names-only placeholder may be filled
+  later. No real reason merging, replacement, or deletion. Guild reasons and other
   metadata are excluded. Changing the option cancels frozen/queued snapshots.
 - Plain bounded records, no deserializer or compression. Native APIs exist but
   their decompressor has no documented output-allocation limit. Compression is
@@ -72,7 +83,17 @@ bytes. At most 64 entries, 512 bytes/preset label, 2,048 bytes/custom text and
 4,096 bytes/complete encoded field. Aggregate encoding overhead can reduce the
 usable custom-text length. No NUL, arbitrary tables, or executable deserialization.
 Malformed/oversized reasons fail visibly rather than truncating.
-Preset labels remain in the sender's language; Other uses the receiver's locale.
+Preset labels remain in the sender's language. For native display, combine labels
+and custom text into a sorted `Guild: description` under the receiver's localized
+Other key, escaping pipes for literal display. Names-only imports with no local
+reason receive `Guild: imported KoS (no shared reason)`. Keep the original encoded
+reason and an independent copy of the generated display in character-scoped
+bookkeeping. Forward the original only while the displayed table still matches;
+otherwise encode the local edit normally. Placeholders never become wire reasons.
+This keeps content hashes and byte limits independent of presentation and avoids
+prefix growth across relays. Real existing reasons, including older unmarked
+imports, are not rewritten. Rendering tests mirror SpyStats/tooltip iteration;
+live UI verification is still required. Spy's DisplayKOSReason option gates tooltips.
 Fingerprints are deterministic paired modular hashes, used for comparison only,
 not authentication or encryption.
 
@@ -170,8 +191,39 @@ changes invalidate active work. A busy peer may be retried on the next sync.
 - Scan for removal of imported records before snapshots/apply/persistence.
   Store player bookkeeping per Spy character + ruleset and guild bookkeeping
   per ruleset. Suppressed imports remain absent until explicitly allowed or
-  manually re-added through Spy.
-- Sync commands: options, sync, cancel, status, debug,
+  manually re-added through Spy. The dashboard supports allowing one name or
+  clearing all player and guild suppressions at once; allowing names does not
+  immediately import them, and requires a subsequent sync.
+- Player import provenance records the KoS membership timestamp; upgrade older
+  boolean records in place. A passive secure post-hook on Spy:ToggleKOSPlayer
+  records explicit local adds/removals, including re-adds within the same second;
+  internal imports do not call this UI method. A changed timestamp also releases
+  membership from cleanup ownership when no UI hook observed the change. Reason provenance
+  is separate: importing a reason onto an already-local player never makes that
+  membership removable. Do not infer either provenance from a `Guild:` prefix.
+- Remove imported KoS cancels local sessions and uses Spy:RemoveKOSData for
+  tracked player memberships only, then regenerates central data and refreshes
+  lists/stats. Suppress every successfully removed name and save. Preserve any
+  reason not equal to our generated display, along with other player metadata;
+  leave watched guilds unchanged. Use native cross-character removal tombstones
+  when sharing is enabled. Reject cleanup during local combat/chat restrictions
+  or missing APIs, and report a failed native removal explicitly. Cleanup works
+  even with guild sync disabled. Untracked historical imports cannot safely be
+  distinguished from local entries automatically; default cleanup leaves them alone.
+- A dashboard-only, unsaved **Include suspected old imports** checkbox opts into
+  heuristic cleanup once. Show a live candidate count and visible warning;
+  reset on show and after cleanup. Candidate membership is untracked, not known
+  explicitly local, and has no zone/level/class (each nil or empty string, or
+  no PlayerData). Skip malformed data and restricted metadata rather than
+  interpreting them as missing. Reasons do not prove provenance. Recompute
+  candidates immediately before removal, never promote them to confirmed imports
+  during scans, and apply normal native removal/preservation/suppression rules.
+  Spy's local ToggleKOSPlayer also calls UpdatePlayerStatus with no class/level
+  or zone, so false positives are possible and the warning is essential.
+  Persist local-add timestamps observed by the secure UI post-hook and timestamp
+  changes; exclude those memberships from heuristics across reloads. The slash
+  command never includes heuristic candidates.
+- Sync commands: options, sync, cancel, removeimports, status, debug,
   allowsync [player|guild] <name>.
 - The options dashboard exposes those actions, live state/counts, and paged
   suppression recovery. `/saboton spyenhancement options` opens a Settings canvas
@@ -216,6 +268,21 @@ Automated acceptance:
 - No confirmation without peer application; retries/session/queue limits bound work.
 - Reject invalid scope/roster/session/sequence/manifest/record/oversized frames.
 - Local imported removals stay removed; reasons and other module behavior survive.
+- Cleanup preserves local/shared-local/re-added names and watched guilds, handles
+  older boolean provenance, survives reload with sync disabled, reports native
+  failures, respects restrictions, and suppresses names through subsequent sync.
+  Same-second explicit remove/re-adds preserve local ownership.
+- Legacy candidates require all three fields absent/empty, exclude any known
+  local membership or any populated field, update counts as metadata arrives,
+  preserve private notes, and remain suppressed after opted-in removal.
+  Both dashboards test opt-in/reset and candidate-only button enablement.
+- The modern and fallback dashboards test per-name allowance, bulk allowance,
+  empty-list button state, and refresh after suppressed names change.
+- Newly imported reasons render in Spy's localized Other slot; one-hop forwarding
+  retains original fingerprints without accumulating prefixes. In-place local
+  edits override both stale tracked wire text and names-only placeholders.
+  Exact-limit original reasons still forward when display decoration is larger
+  than the custom wire-text bound; placeholders never become wire descriptions.
 - Disabled saved settings prevent networking before restore.
 - Queue-count/byte/session limits and a full blocked inbox are tested explicitly;
   ASCII and Cyrillic records at the name-byte limit fit the routing envelope.

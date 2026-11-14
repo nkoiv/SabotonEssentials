@@ -47,6 +47,7 @@ function ExtraAttack:LoadPersistentState(state)
 end
 
 local enabled = true
+local countSealOfCommand = false
 local comboWindow = DEFAULT_COMBO_WINDOW
 local comboCount = 0
 local comboExpireTime = 0
@@ -74,9 +75,26 @@ local mhSwingDuration = nil
 local burstHits = 0
 local burstSettleTimer = nil
 
+-- Each rank of Windfury Totem and Windfury Weapon has its own spell ID (verified on
+-- WoWhead's Forever database), so track every rank alongside the shared weapon proc spell.
 local WINDFURY_SPELL_HITS = {
-    [10608] = 1,   -- Windfury Totem
+    [8516] = 1,    -- Windfury Totem (Rank 1)
+    [10608] = 1,   -- Windfury Totem (Rank 2)
+    [10610] = 1,   -- Windfury Totem (Rank 3)
+    [8232] = 2,    -- Windfury Weapon (Rank 1)
+    [8235] = 2,    -- Windfury Weapon (Rank 2)
+    [10486] = 2,   -- Windfury Weapon (Rank 3)
+    [16362] = 2,   -- Windfury Weapon (Rank 4)
     [439440] = 2,  -- Windfury Weapon
+}
+
+local SEAL_OF_COMMAND_SPELL_HITS = {
+    [20375] = 1,  -- Seal of Command (Rank 1)
+    [20424] = 1,  -- Seal of Command proc
+    [20915] = 1,  -- Seal of Command (Rank 2)
+    [20918] = 1,  -- Seal of Command (Rank 3)
+    [20919] = 1,  -- Seal of Command (Rank 4)
+    [20920] = 1,  -- Seal of Command (Rank 5)
 }
 
 local function findSoundOption(key)
@@ -314,6 +332,11 @@ local function handleSpellCooldown(spellID)
     end
 
     local hits = WINDFURY_SPELL_HITS[spellID]
+    local procName = "Windfury"
+    if not hits and countSealOfCommand then
+        hits = SEAL_OF_COMMAND_SPELL_HITS[spellID]
+        procName = "Seal of Command"
+    end
     if not hits then
         return
     end
@@ -324,7 +347,7 @@ local function handleSpellCooldown(spellID)
     end
 
     if DEBUG then
-        addon.Print("Windfury spell " .. spellID .. " detected: " .. hits .. " extra attack hit(s).")
+        addon.Print(procName .. " spell " .. spellID .. " detected: " .. hits .. " extra attack hit(s).")
     end
 end
 
@@ -361,6 +384,15 @@ function ExtraAttack:GetOptionsSchema()
                         resetCombo()
                     end
                 end,
+            },
+            {
+                type = "checkbox",
+                key = "countSealOfCommand",
+                label = "Count Seal of Command procs",
+                tooltip = "Experimental: count recognized Seal of Command spell updates as extra attacks. Off by default.",
+                default = false,
+                get = function() return countSealOfCommand end,
+                set = function(value) countSealOfCommand = value end,
             },
             {
                 type = "slider",

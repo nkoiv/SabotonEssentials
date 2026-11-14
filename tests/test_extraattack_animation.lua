@@ -53,6 +53,14 @@ assert(loadfile("src/Modules/ExtraAttack.lua"))("SabotonEssentials", addon)
 module:OnEnable()
 local options = module:GetOptionsSchema().options
 assert(options[1].get() == true and options[1].default == true)
+local sealOfCommandOption
+local textEnabledOption
+for _, option in ipairs(options) do
+    if option.key == "countSealOfCommand" then sealOfCommandOption = option end
+    if option.key == "textEnabled" then textEnabledOption = option end
+end
+assert(sealOfCommandOption and sealOfCommandOption.get() == false and sealOfCommandOption.default == false)
+assert(textEnabledOption)
 local display = frames[1]
 
 module:HandleCommand("test")
@@ -92,9 +100,9 @@ assert(offsetX.get() == -150)
 module:HandleCommand("test")
 assert(display.x == -150 and display.y == 80)
 
-options[3].set(false)
+textEnabledOption.set(false)
 assert(not display.shown and not display.scripts.OnUpdate)
-options[3].set(true)
+textEnabledOption.set(true)
 assert(display.shown)
 now = 2
 timers[1].callback()
@@ -178,13 +186,43 @@ assert(displayedComboCount() == comboBeforeWindfury + 1)
 eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
 assert(sounds == soundsBeforeWindfury + 1)
 
-eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 439440, nil, 0, nil)
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 8516, nil, 0, nil)
+assert(displayedComboCount() == comboBeforeWindfury + 2)
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 10610, nil, 0, nil)
 assert(displayedComboCount() == comboBeforeWindfury + 3)
 eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
 assert(sounds == soundsBeforeWindfury + 3)
 
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 439440, nil, 0, nil)
+assert(displayedComboCount() == comboBeforeWindfury + 5)
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
+assert(sounds == soundsBeforeWindfury + 5)
+
+local weaponRankSpellIDs = { 8232, 8235, 10486, 16362 }
+for rank, spellID in ipairs(weaponRankSpellIDs) do
+    eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", spellID, nil, 0, nil)
+    assert(displayedComboCount() == comboBeforeWindfury + 5 + (rank * 2))
+end
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
+assert(sounds == soundsBeforeWindfury + 13)
+
 local comboAfterWindfury = displayedComboCount()
 eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 12345)
 assert(displayedComboCount() == comboAfterWindfury)
+
+local sealOfCommandSpellIDs = { 20375, 20424, 20915, 20918, 20919, 20920 }
+for _, spellID in ipairs(sealOfCommandSpellIDs) do
+    eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", spellID, nil, 0, nil)
+end
+assert(displayedComboCount() == comboAfterWindfury)
+
+sealOfCommandOption.set(true)
+for index, spellID in ipairs(sealOfCommandSpellIDs) do
+    eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", spellID, nil, 0, nil)
+    assert(displayedComboCount() == comboAfterWindfury + index)
+end
+sealOfCommandOption.set(false)
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 20375, nil, 0, nil)
+assert(displayedComboCount() == comboAfterWindfury + #sealOfCommandSpellIDs)
 
 print("Extra Attack animation tests passed")
