@@ -1,1396 +1,831 @@
--- SpyEnhancement module: Integrates with Spy addon for guild-wide enhancements
--- Phase 1: Core KoS (Kill On Sight) Sync system
--- Phase 2: Guild tagging system
--- Phase 3: Cyrillic nationality detection
--- Phase 4: Network Sync via AceComm (IN PROGRESS)
+local _, addon = ...
 
-local ADDON_NAME, addon = ...
 local SpyEnhancement = {}
-local spyAvailable = false
-local aceCommAvailable = false
+local spy
+local sync
+local settingsRestored = false
+local initializationFrame
+local pendingLegacyData
 
--- ============================================================================
--- PHASE 1: KoS SYNC SYSTEM
--- ============================================================================
-
--- Configuration
 local options = {
     enabled = true,
-    syncMode = "both", -- "automatic", "manual", "both"
-    showSyncNotifications = true,
-    guildTaggingEnabled = true,
     networkSyncEnabled = true,
-    syncBroadcastInterval = 300, -- Seconds between auto-sync broadcasts
+    showSyncNotifications = true,
+    shareKOSReasons = false,
 }
 
--- KoS subsystem (Phase 1)
-local KoSSync = {}
+local persistentState = {
+    syncState = {
+        lastSyncTime = 0,
+        syncedWith = {},
+    },
+    cyrillicCache = {},
+}
 
--- ============================================================================
--- PHASE 2: GUILD TAGGING SYSTEM
--- ============================================================================
+local MAX_SYNC_ENTRIES = 500
+local MAX_NAME_LENGTH = 128
+local MAX_REASON_BYTES = 4096
 
--- Guild tagging subsystem (Phase 2)
-local GuildTag = {}
-
--- ============================================================================
--- PHASE 4: NETWORK SYNC VIA ACECOMM
--- ============================================================================
-
--- Network subsystem (Phase 4)
-local NetworkSync = {}
-
--- ============================================================================
--- DATA STRUCTURE UTILITIES
--- ============================================================================
-
--- Normalize player name for storage (player-realm format)
-local function getNormalizedKey(playerName, realm)
-    realm = realm or GetRealmName()
-    return string.lower(playerName .. "-" .. realm)
+local function otherReasonLabel()
+    local locale = LibStub and LibStub("AceLocale-3.0", true)
+    locale = locale and locale:GetLocale("Spy", true)
+    return locale and locale.KOSReasonOther
 end
 
--- Create a KoS entry with all metadata
-local function createKosEntry(playerName, realm, source, sourceGuildie, notes)
-    realm = realm or GetRealmName()
-    return {
-        playerName = playerName,
-        realm = realm,
-        
-        -- Core metadata
-        source = source or "personal",      -- "personal", "guild", "global"
-        addedBy = sourceGuildie or UnitName("player"),  -- Who added this
-        addedAt = time(),                   -- Unix timestamp
-        notes = notes or "",
-        
-        -- Sync tracking
-        sourceGuild = nil,                  -- Populated later if applicable
-        syncFrom = sourceGuildie,           -- Which guildie we got this from
-        
-        -- Local override
-        rejected = false,
-        rejectedAt = nil,
-        rejectionReason = nil,
-        
-        -- Phase 3: Cyrillic analysis (TODO)
-        cyrillicNationality = nil,          -- "russian", "ukrainian", "unclear"
-    }
+local function hex(value)
+    return (value:gsub(".", function(char) return string.format("%02x", char:byte()) end))
 end
 
--- Get or initialize database for this module
-local function getDB()
-    if not SabotonEssentialsDB then
-        SabotonEssentialsDB = {}
+local function encodeReason(reason)
+    if issecretvalue and issecretvalue(reason) then return nil, "Spy has a restricted KoS reason." end
+    if reason == nil then return "" end
+    if type(reason) ~= "table" then
+        return nil, "Spy has an unsupported KoS reason."
     end
-    local modules = SabotonEssentialsDB.modules
-    local moduleSettings = type(modules) == "table" and modules.spyenhancement
-    local state = type(moduleSettings) == "table" and moduleSettings.state
-    if type(state) == "table" and type(state.data) == "table" then
-        return state.data
+    local parts, custom = {}, false
+    for label, value in pairs(reason) do
+        if (issecretvalue and (issecretvalue(label) or issecretvalue(value)))
+            or type(label) ~= "string" or #label == 0 or #label > 512 or label:find("%z") then
+            return nil, "Spy has an invalid KoS reason label."
+        end
+        local tag, text = "B", label
+        if type(value) == "string" then
+            if custom or #value == 0 or #value > 2048 or value:find("%z") or label ~= otherReasonLabel() then
+                return nil, "Spy has an invalid or oversized custom KoS reason (maximum 2,048 bytes)."
+            end
+            custom, tag, text = true, "O", value
+        elseif value ~= true or label == otherReasonLabel() then
+            return nil, "Spy has an unsupported KoS reason value."
+        end
+        text = hex(text)
+        parts[#parts + 1] = tag .. #text .. ":" .. text
+        if #parts > 64 then return nil, "Spy has too many KoS reasons (maximum 64)." end
     end
-    if type(SabotonEssentialsDB.spyenhancement) ~= "table" then
-        SabotonEssentialsDB.spyenhancement = {
-            version = 1,
-            kosPersonal = {},       -- Player's own KoS entries
-            kosSynced = {},         -- Entries received from guildies
-            kosRejected = {},       -- Rejected entries (by key, boolean flag)
-            hosileGuilds = {},      -- TODO: Phase 2 - Guild entries
-            guildMembers = {},      -- TODO: Phase 2 - Guild membership tracking
-            cyrillicCache = {},     -- TODO: Phase 3 - Cached analysis
-            syncState = {
-                lastSyncTime = 0,
-                syncedWith = {},
-            }
-        }
-    end
-    return SabotonEssentialsDB.spyenhancement
+    table.sort(parts)
+    local encoded = table.concat(parts)
+    if #encoded > MAX_REASON_BYTES then return nil, "Spy KoS reasons exceed the 4,096-byte sync limit." end
+    return encoded
 end
 
--- ============================================================================
--- KOS SYNC API
--- ============================================================================
-
--- Add a player to personal KoS
-function KoSSync:Add(playerName, realm, notes)
-    if not playerName or playerName == "" then
-        addon.Print("SpyEnhancement: Invalid player name.")
-        return false
+local function decodeReason(encoded)
+    if #encoded == 0 or #encoded > MAX_REASON_BYTES then return nil end
+    local reason, offset, count = {}, 1, 0
+    while offset <= #encoded do
+        local tag, length, start = encoded:match("^([BO])(%d+):()", offset)
+        length = tonumber(length)
+        if not tag or not length or length == 0 or length % 2 ~= 0
+            or length > 4096 or start + length - 1 > #encoded then return nil end
+        local text = encoded:sub(start, start + length - 1)
+        if text:find("[^0-9a-f]") then return nil end
+        text = text:gsub("%x%x", function(byte) return string.char(tonumber(byte, 16)) end)
+        local label = tag == "B" and text or otherReasonLabel()
+        if not label or reason[label] ~= nil then return nil end
+        reason[label] = tag == "B" and true or text
+        offset, count = start + length, count + 1
+        if count > 64 then return nil end
     end
-    
-    local db = getDB()
-    local key = getNormalizedKey(playerName, realm)
-    
-    -- Create entry
-    local entry = createKosEntry(playerName, realm, "personal", nil, notes)
-    db.kosPersonal[key] = entry
-    
-    addon.Print(string.format("SpyEnhancement: Added %s to personal KoS", playerName))
-    return true
+    if encodeReason(reason) ~= encoded then return nil end
+    return reason
 end
 
--- Remove from personal KoS
-function KoSSync:Remove(playerName, realm)
-    if not playerName or playerName == "" then
-        addon.Print("SpyEnhancement: Invalid player name.")
-        return false
+local function getPersistentState()
+    if type(persistentState.syncState) ~= "table" then
+        persistentState.syncState = { lastSyncTime = 0, syncedWith = {} }
     end
-    
-    local db = getDB()
-    local key = getNormalizedKey(playerName, realm)
-    
-    if db.kosPersonal[key] then
-        db.kosPersonal[key] = nil
-        addon.Print(string.format("SpyEnhancement: Removed %s from personal KoS", playerName))
-        return true
+    if type(persistentState.syncState.lastSyncTime) ~= "number" then
+        persistentState.syncState.lastSyncTime = 0
     end
-    
-    addon.Print(string.format("SpyEnhancement: %s not found in personal KoS", playerName))
-    return false
+    local confirmed = persistentState.syncState.lastConfirmedTime
+    if type(confirmed) ~= "number" or confirmed ~= confirmed or confirmed < 0 or confirmed == math.huge then
+        persistentState.syncState.lastConfirmedTime = 0
+    end
+    if type(persistentState.syncState.syncedWith) ~= "table" then
+        persistentState.syncState.syncedWith = {}
+    end
+    if type(persistentState.cyrillicCache) ~= "table" then
+        persistentState.cyrillicCache = {}
+    end
+    if type(persistentState.listState) ~= "table" then
+        persistentState.listState = { players = {}, guilds = {} }
+    end
+    for _, kind in ipairs({ "players", "guilds" }) do
+        if type(persistentState.listState[kind]) ~= "table" then persistentState.listState[kind] = {} end
+    end
+    return persistentState
 end
 
--- Accept a synced/rejected entry (add to active KoS)
-function KoSSync:Accept(playerName, realm)
-    if not playerName or playerName == "" then
-        addon.Print("SpyEnhancement: Invalid player name.")
-        return false
-    end
-    
-    local db = getDB()
-    local key = getNormalizedKey(playerName, realm)
-    
-    -- Clear rejection flag
-    if db.kosRejected[key] then
-        db.kosRejected[key] = nil
-        addon.Print(string.format("SpyEnhancement: Re-accepted %s", playerName))
-        return true
-    end
-    
-    addon.Print(string.format("SpyEnhancement: %s was not rejected", playerName))
-    return false
+local function trim(value)
+    return (value:gsub("^%s*(.-)%s*$", "%1"))
 end
 
--- Reject a synced entry (keep data but flag as ignored locally)
-function KoSSync:Reject(playerName, realm, reason)
-    if not playerName or playerName == "" then
-        addon.Print("SpyEnhancement: Invalid player name.")
-        return false
-    end
-    
-    local db = getDB()
-    local key = getNormalizedKey(playerName, realm)
-    
-    -- Check if entry exists
-    if not (db.kosPersonal[key] or db.kosSynced[key]) then
-        addon.Print(string.format("SpyEnhancement: %s not found in KoS", playerName))
-        return false
-    end
-    
-    db.kosRejected[key] = true
-    
-    -- Update the entry if it exists
-    if db.kosPersonal[key] then
-        db.kosPersonal[key].rejected = true
-        db.kosPersonal[key].rejectedAt = time()
-        db.kosPersonal[key].rejectionReason = reason or "User rejected"
-    elseif db.kosSynced[key] then
-        db.kosSynced[key].rejected = true
-        db.kosSynced[key].rejectedAt = time()
-        db.kosSynced[key].rejectionReason = reason or "User rejected"
-    end
-    
-    addon.Print(string.format("SpyEnhancement: Rejected %s (%s)", playerName, reason or "no reason"))
-    return true
+local function validName(value)
+    return not (issecretvalue and issecretvalue(value)) and type(value) == "string"
+        and #value > 0
+        and #value <= MAX_NAME_LENGTH
+        and not value:find("[%c]")
 end
 
--- Get a KoS entry (searches personal first, then synced, respecting rejections)
-function KoSSync:Get(playerName, realm)
-    local db = getDB()
-    local key = getNormalizedKey(playerName, realm)
-    
-    -- If rejected, don't return it
-    if db.kosRejected[key] then
+local function getSpyPlayerList()
+    if type(SpyPerCharDB) ~= "table" or type(SpyPerCharDB.KOSData) ~= "table" then
         return nil
     end
-    
-    -- Return personal first, then synced
-    return db.kosPersonal[key] or db.kosSynced[key]
+    return SpyPerCharDB.KOSData
 end
 
--- Check if player is on KoS (simple boolean, respects rejections)
-function KoSSync:IsOnKoS(playerName, realm)
-    return self:Get(playerName, realm) ~= nil
-end
-
--- Get count of active KoS entries
-function KoSSync:GetCount()
-    local db = getDB()
-    local count = 0
-    
-    -- Count personal entries
-    for key in pairs(db.kosPersonal) do
-        if not db.kosRejected[key] then
-            count = count + 1
-        end
+local function getWatchedGuilds()
+    if not spy or type(spy.GuildList) ~= "function" then
+        return nil
     end
-    
-    -- Count synced entries (only if not also in personal)
-    for key in pairs(db.kosSynced) do
-        if not db.kosRejected[key] and not db.kosPersonal[key] then
-            count = count + 1
-        end
+    local guilds = spy:GuildList()
+    return type(guilds) == "table" and guilds or nil
+end
+
+local function guildKey(guildName)
+    return trim(guildName):lower()
+end
+
+local function watchedGuild(guildName, guilds)
+    if spy and type(spy.WatchedGuild) == "function" then
+        return spy:WatchedGuild(guildName)
     end
-    
-    return count
+    return guilds[guildKey(guildName)]
 end
 
--- Get all active KoS entries (for UI display)
-function KoSSync:GetAll()
-    local db = getDB()
-    local result = {}
-    
-    -- Add personal
-    for key, entry in pairs(db.kosPersonal) do
-        if not db.kosRejected[key] then
-            table.insert(result, entry)
-        end
-    end
-    
-    -- Add synced (only if not also in personal)
-    for key, entry in pairs(db.kosSynced) do
-        if not db.kosRejected[key] and not db.kosPersonal[key] then
-            table.insert(result, entry)
-        end
-    end
-    
-    return result
+local function importsRestricted()
+    local chat = Enum and Enum.AddOnRestrictionType and Enum.AddOnRestrictionType.Chat
+    return (InCombatLockdown and InCombatLockdown()) or (sync and sync.restriction)
+        or (C_ChatInfo and C_ChatInfo.InChatMessagingLockdown and C_ChatInfo.InChatMessagingLockdown())
+        or (chat and C_RestrictedActions and C_RestrictedActions.IsAddOnRestrictionActive
+            and C_RestrictedActions.IsAddOnRestrictionActive(chat))
 end
 
--- List stats for debugging/status
-function KoSSync:GetStats()
-    local db = getDB()
-    local personalCount = 0
-    local syncedCount = 0
-    local rejectedCount = 0
-    
-    for _ in pairs(db.kosPersonal) do personalCount = personalCount + 1 end
-    for _ in pairs(db.kosSynced) do syncedCount = syncedCount + 1 end
-    for _ in pairs(db.kosRejected) do rejectedCount = rejectedCount + 1 end
-    
-    return {
-        personal = personalCount,
-        synced = syncedCount,
-        active = self:GetCount(),
-        rejected = rejectedCount,
-        lastSync = db.syncState.lastSyncTime,
-    }
-end
-
--- ============================================================================
--- GUILD TAGGING API (Phase 2)
--- ============================================================================
-
--- Create a guild entry
-local function createGuildEntry(guildName, notes)
-    return {
-        guildName = guildName,
-        addedBy = UnitName("player"),
-        addedAt = time(),
-        notes = notes or "",
-        memberCount = 0,           -- Tracked members
-        lastSeen = 0,              -- Last time a member was detected
-        rejected = false,          -- Local override
-    }
-end
-
--- Normalize guild name for storage
-local function getNormalizedGuildKey(guildName)
-    return string.lower(guildName)
-end
-
--- Add a guild to hostile list
-function GuildTag:Add(guildName, notes)
-    if not guildName or guildName == "" then
-        addon.Print("SpyEnhancement: Invalid guild name.")
+local function updateSpyKOSPlayer(name, add, reason)
+    if importsRestricted() then return false end
+    local share = spy.db and spy.db.profile and spy.db.profile.ShareKOSBetweenCharacters
+    if share and type(spy.RegenerateKOSCentralList) ~= "function" then
+        addon.Print("SpyEnhancement: Spy's central KoS update API is unavailable; sync was not applied.")
         return false
     end
-
-    local db = getDB()
-    local key = getNormalizedGuildKey(guildName)
-
-    -- Create entry
-    local entry = createGuildEntry(guildName, notes)
-    db.hosileGuilds[key] = entry
-
-    addon.Print(string.format("SpyEnhancement: Added guild %s to hostile list", guildName))
+    -- Mirror ToggleKOSPlayer's data updates without its chat/sound side effects.
+    spy:UpdatePlayerStatus(name, nil, nil, nil, nil, nil, true, nil, nil)
+    local data = SpyPerCharDB.PlayerData[name]
+    if type(data) ~= "table" or data.name ~= name or type(data.time) ~= "number" or data.isEnemy ~= true then
+        addon.Print("SpyEnhancement: Spy did not create the imported KoS player's display data; sync was not applied.")
+        return false
+    end
+    if add then spy:AddKOSData(name) end
+    if not getSpyPlayerList()[name] then
+        addon.Print("SpyEnhancement: Spy did not add the imported KoS player; sync was not applied.")
+        return false
+    end
+    spy:RemoveIgnoreData(name)
+    data.kos = 1
+    -- Any existing non-empty reason wins, whether written locally or imported earlier.
+    if reason and (data.reason == nil or (type(data.reason) == "table" and next(data.reason) == nil)) then
+        data.reason = reason
+    end
+    if share then spy:RegenerateKOSCentralList(name) end
+    if type(spy.RegenerateKOSGuildList) == "function" then spy:RegenerateKOSGuildList() end
+    if type(spy.RefreshCurrentList) == "function" then spy:RefreshCurrentList() end
+    if SpyStats and type(SpyStats.Recalulate) == "function" then SpyStats:Recalulate() end
     return true
 end
 
--- Remove a guild from hostile list
-function GuildTag:Remove(guildName)
-    if not guildName or guildName == "" then
-        addon.Print("SpyEnhancement: Invalid guild name.")
-        return false
-    end
+local function migrateLegacyPlayerLists(legacyData)
+    local playerList = getSpyPlayerList()
+    if type(legacyData) ~= "table" or not playerList or importsRestricted() then return false end
 
-    local db = getDB()
-    local key = getNormalizedGuildKey(guildName)
-
-    if db.hosileGuilds[key] then
-        db.hosileGuilds[key] = nil
-        addon.Print(string.format("SpyEnhancement: Removed guild %s from hostile list", guildName))
-        
-        -- Also remove associated members
-        if db.guildMembers[key] then
-            db.guildMembers[key] = nil
+    local rejected = type(legacyData.kosRejected) == "table" and legacyData.kosRejected or {}
+    local imported = 0
+    for _, list in ipairs({ legacyData.kosPersonal or {}, legacyData.kosSynced or {} }) do
+        if type(list) == "table" then
+            for key, entry in pairs(list) do
+                if type(entry) == "table" and not rejected[key] and not entry.rejected then
+                    local name = entry.playerName
+                    if validName(name) then
+                        local realm = entry.realm
+                        if type(realm) == "string" and realm ~= "" and realm ~= GetRealmName()
+                            and not name:find("-", 1, true) then
+                            name = name .. "-" .. realm
+                        end
+                        if not playerList[name] then
+                            if not updateSpyKOSPlayer(name, true) then return false end
+                            imported = imported + 1
+                        end
+                    end
+                end
+            end
         end
-        return true
     end
 
-    addon.Print(string.format("SpyEnhancement: Guild %s not found", guildName))
-    return false
-end
-
--- Reject a hostile guild locally (keep data but ignore)
-function GuildTag:Reject(guildName, reason)
-    if not guildName or guildName == "" then
-        addon.Print("SpyEnhancement: Invalid guild name.")
-        return false
+    if imported > 0 then
+        if type(spy.RegenerateKOSGuildList) == "function" then spy:RegenerateKOSGuildList() end
+        if type(spy.RefreshCurrentList) == "function" then spy:RefreshCurrentList() end
+        addon.Print(string.format("SpyEnhancement: Imported %d legacy KoS entr%s into Spy.",
+            imported, imported == 1 and "y" or "ies"))
     end
-
-    local db = getDB()
-    local key = getNormalizedGuildKey(guildName)
-
-    if db.hosileGuilds[key] then
-        db.hosileGuilds[key].rejected = true
-        addon.Print(string.format("SpyEnhancement: Rejected guild %s (%s)", guildName, reason or "no reason"))
-        return true
-    end
-
-    addon.Print(string.format("SpyEnhancement: Guild %s not found", guildName))
-    return false
-end
-
--- Accept a rejected guild
-function GuildTag:Accept(guildName)
-    if not guildName or guildName == "" then
-        addon.Print("SpyEnhancement: Invalid guild name.")
-        return false
-    end
-
-    local db = getDB()
-    local key = getNormalizedGuildKey(guildName)
-
-    if db.hosileGuilds[key] and db.hosileGuilds[key].rejected then
-        db.hosileGuilds[key].rejected = false
-        addon.Print(string.format("SpyEnhancement: Re-accepted guild %s", guildName))
-        return true
-    end
-
-    addon.Print(string.format("SpyEnhancement: Guild %s not rejected or not found", guildName))
-    return false
-end
-
--- Get a guild entry
-function GuildTag:Get(guildName)
-    local db = getDB()
-    local key = getNormalizedGuildKey(guildName)
-    local entry = db.hosileGuilds[key]
-
-    -- Don't return rejected entries
-    if entry and not entry.rejected then
-        return entry
-    end
-
-    return nil
-end
-
--- Check if guild is flagged as hostile
-function GuildTag:IsHostile(guildName)
-    return self:Get(guildName) ~= nil
-end
-
--- Register a guild member (auto-called when player detected in Spy)
-function GuildTag:RegisterMember(guildName, playerName, realm)
-    if not guildName or not playerName then
-        return false
-    end
-
-    local db = getDB()
-    local guildKey = getNormalizedGuildKey(guildName)
-    local playerKey = getNormalizedKey(playerName, realm)
-
-    -- Only track if guild is marked hostile
-    if not db.hosileGuilds[guildKey] then
-        return false
-    end
-
-    -- Initialize guild members table
-    if not db.guildMembers[guildKey] then
-        db.guildMembers[guildKey] = {}
-    end
-
-    -- Track member
-    local now = time()
-    db.guildMembers[guildKey][playerKey] = {
-        playerName = playerName,
-        realm = realm,
-        detected = db.guildMembers[guildKey][playerKey] and db.guildMembers[guildKey][playerKey].detected or now,
-        updated = now,
-    }
-
-    -- Update guild's lastSeen and memberCount
-    db.hosileGuilds[guildKey].lastSeen = now
-    db.hosileGuilds[guildKey].memberCount = 0
-    for _ in pairs(db.guildMembers[guildKey]) do
-        db.hosileGuilds[guildKey].memberCount = db.hosileGuilds[guildKey].memberCount + 1
-    end
-
     return true
 end
 
--- Get all members of a hostile guild
-function GuildTag:GetMembers(guildName)
-    local db = getDB()
-    local key = getNormalizedGuildKey(guildName)
-
-    if not db.guildMembers[key] then
-        return {}
-    end
-
-    local result = {}
-    for playerKey, member in pairs(db.guildMembers[key]) do
-        table.insert(result, member)
-    end
-    return result
-end
-
--- Get all active hostile guilds
-function GuildTag:GetAll()
-    local db = getDB()
-    local result = {}
-
-    for key, entry in pairs(db.hosileGuilds) do
-        if not entry.rejected then
-            table.insert(result, entry)
-        end
-    end
-
-    return result
-end
-
--- Get guild stats
-function GuildTag:GetStats()
-    local db = getDB()
-    local allCount = 0
-    local rejectedCount = 0
-    local totalMembers = 0
-
-    for _, entry in pairs(db.hosileGuilds) do
-        if entry.rejected then
-            rejectedCount = rejectedCount + 1
+local function identity(name)
+    if name == nil then
+        if spy and type(spy.PlayerName) == "function" then
+            name = spy:PlayerName("player")
         else
-            allCount = allCount + 1
-            totalMembers = totalMembers + entry.memberCount
+            local first, second = UnitName("player")
+            if not validName(first) then return nil end
+            name = first
+            if validName(second) then name = first .. "-" .. second end
         end
     end
-
-    return {
-        active = allCount,
-        rejected = rejectedCount,
-        totalGuilds = allCount + rejectedCount,
-        trackedMembers = totalMembers,
-    }
+    if not validName(name) then return nil end
+    -- On Forever the second name component is a surname, not an internal realm.
+    if RegionalUniqueNamesEnabled and RegionalUniqueNamesEnabled() then
+        -- Guild chat uses "First Last"; Spy and some roster APIs use "First-Last".
+        return (name:gsub(" ", "-"))
+    end
+    if not name:find("-", 1, true) then
+        local realm = GetNormalizedRealmName and GetNormalizedRealmName() or GetRealmName():gsub("%s", "")
+        name = name .. "-" .. realm
+    end
+    return name
 end
 
--- ============================================================================
--- PHASE 3: CYRILLIC NATIONALITY DETECTION
--- ============================================================================
+local function listScope()
+    return spy and (spy.StoreRealm or spy.RealmName) or GetRealmName()
+end
 
--- Cyrillic detection subsystem (Phase 3)
-local CyrillicDetector = {}
+local function syncScope()
+    local guild = GetGuildInfo and GetGuildInfo("player")
+    if not validName(guild) then return nil end
+    return listScope() .. "\t" .. guild
+end
 
--- Character sets for Russian and Ukrainian
--- Based on Unicode Cyrillic block and language-specific characters
+local function parseRecord(record)
+    if type(record) ~= "string" then return nil end
+    local kind, name, suffix = record:match("^([PG])\t([^\t]+)(.*)$")
+    if not validName(name) or trim(name) ~= name then return nil end
+    local reason
+    if suffix ~= "" then
+        if kind ~= "P" or suffix:sub(1, 1) ~= "\t" then return nil end
+        reason = decodeReason(suffix:sub(2))
+        if not reason then return nil end
+    end
+    return kind, name, reason, suffix
+end
+
+local function recordKey(record)
+    local kind, name = parseRecord(record)
+    if not kind then return nil end
+    if kind == "P" then
+        local canonical = identity(name)
+        return canonical and ("P\t" .. canonical:lower())
+    end
+
+    return kind == "G" and ("G\t" .. guildKey(name)) or nil
+end
+
+local function recordContentKey(record)
+    local key = recordKey(record)
+    local _, _, _, suffix = parseRecord(record)
+    return key and (key .. suffix)
+end
+
+local function listBookkeeping(kind)
+    local state = getPersistentState().listState
+    local key = listScope()
+    local entries
+    if kind == "P" then
+        key = key .. "\t" .. (spy.StoreCharacter or identity() or "?")
+        entries = state.players
+    else
+        entries = state.guilds
+    end
+    if type(entries[key]) ~= "table" then entries[key] = {} end
+    local entry = entries[key]
+    if type(entry.imported) ~= "table" then entry.imported = {} end
+    if type(entry.suppressed) ~= "table" then entry.suppressed = {} end
+    return entry
+end
+
+local function localRecords()
+    local players, guilds = getSpyPlayerList(), getWatchedGuilds()
+    if not players or not guilds then return nil, "Spy's lists are unavailable." end
+    local records, present = {}, {}
+    local playerCount, guildCount = 0, 0
+    for name in pairs(players) do
+        local record = type(name) == "string" and "P\t" .. name
+        local key = record and recordKey(record)
+        if not key then return nil, "Spy contains a player name that cannot be synced." end
+        if settingsRestored and not importsRestricted() and listBookkeeping("P").imported[key] then
+            local data = SpyPerCharDB.PlayerData[name]
+            if type(data) ~= "table" or data.kos ~= 1 or data.name ~= name
+                or type(data.time) ~= "number" or data.isEnemy ~= true then
+                if not updateSpyKOSPlayer(name, false) then
+                    return nil, "Spy's imported KoS display data could not be repaired."
+                end
+            end
+        end
+        if options.shareKOSReasons then
+            local data = SpyPerCharDB.PlayerData[name]
+            local encoded, err = encodeReason(data and data.reason)
+            if not encoded then return nil, err end
+            if encoded ~= "" then record = record .. "\t" .. encoded end
+        end
+        if not present[key] then
+            records[#records + 1], present[key] = record, name
+            playerCount = playerCount + 1
+        end
+    end
+    for key, entry in pairs(guilds) do
+        local name = type(entry) == "table" and entry.name or key
+        local record = type(name) == "string" and "G\t" .. name
+        local canonical = record and recordKey(record)
+        if not canonical then return nil, "Spy contains a guild name that cannot be synced." end
+        if not present[canonical] then
+            records[#records + 1], present[canonical] = record, true
+            guildCount = guildCount + 1
+        end
+    end
+    if playerCount > MAX_SYNC_ENTRIES or guildCount > MAX_SYNC_ENTRIES then
+        return nil, "Spy sync supports at most 500 players and 500 guilds."
+    end
+    for _, kind in ipairs({ "P", "G" }) do
+        local book = listBookkeeping(kind)
+        for key in pairs(book.imported) do
+            if not present[key] then
+                book.imported[key], book.suppressed[key] = nil, true
+            end
+        end
+        for key in pairs(book.suppressed) do
+            if present[key] then book.suppressed[key] = nil end
+        end
+    end
+    return records, present
+end
+
+local function applyRecord(record)
+    local key = recordKey(record)
+    if not key then return false end
+    local records, present = localRecords()
+    if not records then return false end
+    local kind, name, reason = parseRecord(record)
+    local book = listBookkeeping(kind)
+    if book.suppressed[key] then return true, false end
+    if present[key] then
+        if kind == "P" and reason then
+            local actualName = present[key]
+            local data = SpyPerCharDB.PlayerData[actualName]
+            if not data or data.reason == nil or (type(data.reason) == "table" and next(data.reason) == nil) then
+                if not updateSpyKOSPlayer(actualName, false, reason) then return false end
+                if addon.SaveSettings then addon.SaveSettings() end
+            end
+        end
+        return true, false
+    end
+    local count, metadata = 0, 0
+    for _, current in ipairs(records) do if current:sub(1, 1) == kind then count = count + 1 end end
+    for _ in pairs(book.imported) do metadata = metadata + 1 end
+    for _ in pairs(book.suppressed) do metadata = metadata + 1 end
+    if count >= MAX_SYNC_ENTRIES or metadata >= 1000 then
+        addon.Print("SpyEnhancement: Import limit reached; sync was not applied.")
+        return false
+    end
+    if kind == "P" then
+        if not updateSpyKOSPlayer(name, true, reason) then return false end
+    else
+        if not watchedGuild(name, getWatchedGuilds()) then spy:ToggleGuild(name, nil, true) end
+    end
+    book.imported[key] = true
+    if addon.SaveSettings then addon.SaveSettings() end
+    return true, true
+end
+
+local function isCyrillicCodepoint(codepoint)
+    return codepoint >= 0x0400 and codepoint <= 0x052F
+end
+
 local RUSSIAN_SPECIFIC = {
-    ['Ё'] = true, ['ё'] = true,  -- Russian yo
-    ['Ы'] = true, ['ы'] = true,  -- Russian y
-    ['Э'] = true, ['э'] = true,  -- Russian e (backwards)
+    [0x0401] = true, [0x0451] = true, -- Ё
+    [0x042B] = true, [0x044B] = true, -- Ы
+    [0x042D] = true, [0x044D] = true, -- Э
+    [0x042A] = true, [0x044A] = true, -- Ъ
 }
 
 local UKRAINIAN_SPECIFIC = {
-    ['Ї'] = true, ['ї'] = true,  -- Ukrainian yi
-    ['Є'] = true, ['є'] = true,  -- Ukrainian ye
-    ['Ґ'] = true, ['ґ'] = true,  -- Ukrainian ge
-    ['І'] = true, ['і'] = true,  -- Ukrainian i
+    [0x0404] = true, [0x0454] = true, -- Є
+    [0x0406] = true, [0x0456] = true, -- І
+    [0x0407] = true, [0x0457] = true, -- Ї
+    [0x0490] = true, [0x0491] = true, -- Ґ
 }
 
--- Common Cyrillic characters (shared between Russian and Ukrainian)
-local COMMON_CYRILLIC = {
-    ['А'] = true, ['а'] = true, ['Б'] = true, ['б'] = true, ['В'] = true, ['в'] = true,
-    ['Г'] = true, ['г'] = true, ['Д'] = true, ['д'] = true, ['Е'] = true, ['е'] = true,
-    ['Ж'] = true, ['ж'] = true, ['З'] = true, ['з'] = true, ['И'] = true, ['и'] = true,
-    ['Й'] = true, ['й'] = true, ['К'] = true, ['к'] = true, ['Л'] = true, ['л'] = true,
-    ['М'] = true, ['м'] = true, ['Н'] = true, ['н'] = true, ['О'] = true, ['о'] = true,
-    ['П'] = true, ['п'] = true, ['Р'] = true, ['р'] = true, ['С'] = true, ['с'] = true,
-    ['Т'] = true, ['т'] = true, ['У'] = true, ['у'] = true, ['Ф'] = true, ['ф'] = true,
-    ['Х'] = true, ['х'] = true, ['Ц'] = true, ['ц'] = true, ['Ч'] = true, ['ч'] = true,
-    ['Ш'] = true, ['ш'] = true, ['Щ'] = true, ['щ'] = true, ['Ъ'] = true, ['ъ'] = true,
-    ['Ь'] = true, ['ь'] = true, ['Ю'] = true, ['ю'] = true,
-}
-
--- Detect nationality of player name based on Cyrillic characters
--- Returns: "russian", "ukrainian", "unclear", or nil (no Cyrillic)
-function CyrillicDetector:Detect(playerName)
-    if not playerName or playerName == "" then
-        return nil
-    end
-
-    -- Check cache first
-    local db = getDB()
-    if db.cyrillicCache[playerName] then
-        return db.cyrillicCache[playerName]
-    end
-
-    local russianScore = 0
-    local ukrainianScore = 0
-    local cyrillicCount = 0
-
-    -- Scan each character in the name
-    for i = 1, #playerName do
-        local char = playerName:sub(i, i)
-
-        -- Check for Russian-specific
-        if RUSSIAN_SPECIFIC[char] then
-            russianScore = russianScore + 1
-            cyrillicCount = cyrillicCount + 1
-        end
-
-        -- Check for Ukrainian-specific
-        if UKRAINIAN_SPECIFIC[char] then
-            ukrainianScore = ukrainianScore + 1
-            cyrillicCount = cyrillicCount + 1
-        end
-
-        -- Check for common Cyrillic
-        if COMMON_CYRILLIC[char] then
-            cyrillicCount = cyrillicCount + 1
+local function analyzeCyrillic(text)
+    local result = { nationality = nil, cyrillic = 0, russian = 0, ukrainian = 0 }
+    local index = 1
+    while index <= #text do
+        local first, second = text:byte(index, index + 1)
+        if first and second and first >= 0xD0 and first <= 0xD3
+            and second >= 0x80 and second <= 0xBF then
+            local codepoint = (first - 0xC0) * 64 + second - 0x80
+            if isCyrillicCodepoint(codepoint) then
+                result.cyrillic = result.cyrillic + 1
+                if RUSSIAN_SPECIFIC[codepoint] then
+                    result.russian = result.russian + 1
+                end
+                if UKRAINIAN_SPECIFIC[codepoint] then
+                    result.ukrainian = result.ukrainian + 1
+                end
+            end
+            index = index + 2
+        else
+            index = index + 1
         end
     end
 
-    -- If no Cyrillic found, return nil
-    if cyrillicCount == 0 then
-        return nil
+    if result.cyrillic > 0 then
+        if result.russian > result.ukrainian then
+            result.nationality = "russian"
+        elseif result.ukrainian > result.russian then
+            result.nationality = "ukrainian"
+        else
+            result.nationality = "unclear"
+        end
     end
-
-    -- Determine nationality based on scores
-    local result
-    if russianScore > ukrainianScore then
-        result = "russian"
-    elseif ukrainianScore > russianScore then
-        result = "ukrainian"
-    else
-        -- Equal scores or only common characters = unclear
-        result = "unclear"
-    end
-
-    -- Cache the result
-    db.cyrillicCache[playerName] = result
     return result
 end
 
--- Get cached nationality result
-function CyrillicDetector:GetCached(playerName)
-    if not playerName then return nil end
-    local db = getDB()
-    return db.cyrillicCache[playerName]
+local function analyzeText(text, kind)
+    if type(text) ~= "string" or text == "" then return nil end
+    local key = (kind or "player") .. ":" .. text:lower()
+    local cache = getPersistentState().cyrillicCache
+    local cached = cache[key]
+    if type(cached) == "table" then return cached end
+
+    local result = analyzeCyrillic(text)
+    cache[key] = result
+    return result
 end
 
--- Clear cache for a specific player
-function CyrillicDetector:ClearCache(playerName)
-    if not playerName then return end
-    local db = getDB()
-    db.cyrillicCache[playerName] = nil
-end
-
--- Clear all cached results
-function CyrillicDetector:ClearAllCache()
-    local db = getDB()
-    db.cyrillicCache = {}
-end
-
--- Get stats on Cyrillic players detected
-function CyrillicDetector:GetStats()
-    local db = getDB()
-    local russianCount = 0
-    local ukrainianCount = 0
-    local unclearCount = 0
-
-    for _, nationality in pairs(db.cyrillicCache) do
-        if nationality == "russian" then
-            russianCount = russianCount + 1
-        elseif nationality == "ukrainian" then
-            ukrainianCount = ukrainianCount + 1
-        elseif nationality == "unclear" then
-            unclearCount = unclearCount + 1
+local function countCache()
+    local counts = { russian = 0, ukrainian = 0, unclear = 0, total = 0 }
+    for _, result in pairs(getPersistentState().cyrillicCache) do
+        if type(result) == "table" and result.nationality then
+            counts[result.nationality] = (counts[result.nationality] or 0) + 1
+            counts.total = counts.total + 1
         end
     end
-
-    return {
-        russian = russianCount,
-        ukrainian = ukrainianCount,
-        unclear = unclearCount,
-        total = russianCount + ukrainianCount + unclearCount,
-    }
+    return counts
 end
 
--- Batch detect players (e.g., from KoS list)
-function CyrillicDetector:DetectBatch(playerNames)
-    if not playerNames or #playerNames == 0 then
-        return {}
-    end
-
-    local results = {}
-    for _, playerName in ipairs(playerNames) do
-        local nationality = self:Detect(playerName)
-        if nationality then
-            if not results[nationality] then
-                results[nationality] = {}
-            end
-            table.insert(results[nationality], playerName)
-        end
-    end
-
-    return results
-end
-
--- ============================================================================
--- NETWORK SYNC API (Phase 4)
--- ============================================================================
-
--- Sync message format version
-local SYNC_MESSAGE_VERSION = 1
-
--- Sync message channel (needs to be unique and guild-safe)
-local SYNC_CHANNEL_PREFIX = "SabotonSpySync"
-
--- Get AceComm library if available
-local function getAceComm()
-    if not LibStub then return nil end
-    return LibStub:GetLibrary("AceComm-3.0", true)
-end
-
--- Serialize KoS entries for network transmission (compact format)
-local function serializeKosEntries(entries)
-    local serialized = {}
-    for _, entry in ipairs(entries) do
-        -- Pack into minimal format to save bandwidth
-        table.insert(serialized, {
-            n = entry.playerName,  -- name
-            r = entry.realm,       -- realm
-            a = entry.addedBy,     -- added by
-            t = entry.addedAt,     -- timestamp
-            s = entry.source,      -- source
-            o = entry.notes,       -- notes (optional)
-        })
-    end
-    return serialized
-end
-
--- Deserialize received KoS entries
-local function deserializeKosEntries(serialized, sourceGuildie)
-    local entries = {}
-    for _, data in ipairs(serialized) do
-        table.insert(entries, {
-            playerName = data.n,
-            realm = data.r,
-            source = "guild",                    -- Network sync always marks as "guild" source
-            addedBy = data.a,                    -- Original adder
-            addedAt = data.t,
-            notes = data.o or "",
-            syncFrom = sourceGuildie,            -- Track who we got this from
-            sourceGuild = nil,
-            rejected = false,
-            rejectedAt = nil,
-            rejectionReason = nil,
-            cyrillicNationality = nil,
-        })
-    end
-    return entries
-end
-
--- Prepare sync message for transmission
-local function createSyncMessage(kosEntries)
-    return {
-        version = SYNC_MESSAGE_VERSION,
-        timestamp = time(),
-        sender = UnitName("player"),
-        senderGuild = GetGuildInfo("player") or "Unknown",
-        
-        -- Payload
-        kosCount = #kosEntries,
-        kosData = serializeKosEntries(kosEntries),
-        
-        -- TODO: Add guild sync data in future
-        guildCount = 0,
-        guildData = {},
-    }
-end
-
--- Process received sync message
-function NetworkSync:ReceiveSyncMessage(message, sender, distribution)
-    if not message or not sender then
-        return false
-    end
-
-    -- Validate message version
-    if message.version ~= SYNC_MESSAGE_VERSION then
-        addon.Print(string.format("SpyEnhancement: Sync message from %s has incompatible version %d", 
-            sender, message.version or 0))
-        return false
-    end
-
-    local db = getDB()
-    local receivedCount = 0
-    local mergedCount = 0
-
-    -- Process received KoS entries (union strategy)
-    if message.kosData and #message.kosData > 0 then
-        local entries = deserializeKosEntries(message.kosData, sender)
-        
-        for _, entry in ipairs(entries) do
-            local key = getNormalizedKey(entry.playerName, entry.realm)
-            
-            -- Union strategy: only add if not already present (locally or synced)
-            if not db.kosPersonal[key] and not db.kosSynced[key] then
-                db.kosSynced[key] = entry
-                mergedCount = mergedCount + 1
-            end
-            
-            receivedCount = receivedCount + 1
-        end
-    end
-
-    -- Update sync state
-    if not db.syncState.syncedWith then
-        db.syncState.syncedWith = {}
-    end
-    
-    -- Track who we synced with
+local function recordSync(sender)
+    local syncState = getPersistentState().syncState
     local alreadySynced = false
-    for _, guildmate in ipairs(db.syncState.syncedWith) do
-        if guildmate == sender then
+    for _, name in ipairs(syncState.syncedWith) do
+        if name == sender then
             alreadySynced = true
             break
         end
     end
-    if not alreadySynced then
-        table.insert(db.syncState.syncedWith, sender)
-    end
-
-    if options.showSyncNotifications then
-        addon.Print(string.format("SpyEnhancement: Synced with %s - received %d, merged %d entries",
-            sender, receivedCount, mergedCount))
-    end
-
-    return true
-end
-
--- Send sync message to guild (requires AceComm)
-function NetworkSync:BroadcastKoS()
-    if not aceCommAvailable then
-        addon.Print("SpyEnhancement: AceComm not available, cannot broadcast")
-        return false
-    end
-
-    local aceComm = getAceComm()
-    if not aceComm then
-        return false
-    end
-
-    -- Get all active KoS entries to broadcast
-    local entries = KoSSync:GetAll()
-    if #entries == 0 then
-        addon.Print("SpyEnhancement: No KoS entries to broadcast")
-        return false
-    end
-
-    -- Create sync message
-    local message = createSyncMessage(entries)
-    
-    -- Serialize to string for transmission
-    local AceSerializer = LibStub:GetLibrary("AceSerializer-3.0", true)
-    if not AceSerializer then
-        addon.Print("SpyEnhancement: AceSerializer not available")
-        return false
-    end
-
-    local serialized = AceSerializer:Serialize(message)
-    if not serialized then
-        addon.Print("SpyEnhancement: Failed to serialize KoS data")
-        return false
-    end
-
-    -- Send to guild
-    local channel = SYNC_CHANNEL_PREFIX .. ":" .. ADDON_NAME
-    aceComm:SendCommMessage(channel, serialized, "GUILD", nil, "ALERT")
-
-    addon.Print(string.format("SpyEnhancement: Broadcasted %d KoS entries to guild", #entries))
-    
-    local db = getDB()
-    db.syncState.lastSyncTime = time()
-    
-    return true
-end
-
--- Setup AceComm message receiver
-function NetworkSync:RegisterMessageHandler()
-    if not aceCommAvailable then
-        return false
-    end
-
-    local aceComm = getAceComm()
-    if not aceComm then
-        return false
-    end
-
-    local AceSerializer = LibStub:GetLibrary("AceSerializer-3.0", true)
-    if not AceSerializer then
-        return false
-    end
-
-    local channel = SYNC_CHANNEL_PREFIX .. ":" .. ADDON_NAME
-
-    aceComm:RegisterComm(channel, function(prefix, serialized, distribution, sender)
-        if sender == UnitName("player") then
-            return  -- Ignore our own broadcasts
-        end
-
-        local success, message = AceSerializer:Deserialize(serialized)
-        if not success then
-            addon.Print(string.format("SpyEnhancement: Failed to deserialize message from %s", sender))
-            return
-        end
-
-        NetworkSync:ReceiveSyncMessage(message, sender, distribution)
-    end)
-
-    addon.Print("SpyEnhancement: Message handler registered")
-    return true
-end
-
--- Get stats on network sync
-function NetworkSync:GetStats()
-    local db = getDB()
-    local syncedWith = 0
-    if db.syncState.syncedWith then
-        syncedWith = #db.syncState.syncedWith
-    end
-
-    return {
-        lastSyncTime = db.syncState.lastSyncTime,
-        syncedWith = syncedWith,
-        syncedWithList = db.syncState.syncedWith or {},
-    }
-end
-
--- ============================================================================
--- MANUAL SYNC WITH NETWORK SUPPORT (Phase 1 + Phase 4)
--- ============================================================================
-
-function KoSSync:ManualSync()
-    if not options.networkSyncEnabled then
-        addon.Print("SpyEnhancement: Network sync is disabled")
-        return false
-    end
-
-    if aceCommAvailable then
-        addon.Print("SpyEnhancement: Broadcasting KoS to guild...")
-        return NetworkSync:BroadcastKoS()
-    else
-        addon.Print("SpyEnhancement: Network sync not available (AceComm not found)")
-        local stats = self:GetStats()
-        addon.Print(string.format("KoS Status: %d active (personal: %d, synced: %d, rejected: %d)",
-            stats.active, stats.personal, stats.synced, stats.rejected))
-        return false
+    if not alreadySynced and #syncState.syncedWith < 64 then
+        syncState.syncedWith[#syncState.syncedWith + 1] = sender
     end
 end
 
--- ============================================================================
--- MODULE INTEGRATION
--- ============================================================================
+function SpyEnhancement:Broadcast()
+    if not sync then addon.Print("SpyEnhancement: Spy is not ready.") return false end
+    if settingsRestored and options.networkSyncEnabled and not sync.active and not sync:Start() then return false end
+    return sync:Begin()
+end
 
 function SpyEnhancement:GetPersistentState()
-    return { enabled = options.enabled, syncMode = options.syncMode, data = getDB() }
+    if spy and getSpyPlayerList() and getWatchedGuilds() then localRecords() end
+    local state = getPersistentState()
+    state.data = pendingLegacyData
+    return state
 end
 
 function SpyEnhancement:LoadPersistentState(state)
-    if type(state) == "table" then
-        if type(state.enabled) == "boolean" then options.enabled = state.enabled end
-        if type(state.syncMode) == "string" then options.syncMode = state.syncMode end
-        if type(state.data) == "table" then
-            SabotonEssentialsDB = type(SabotonEssentialsDB) == "table" and SabotonEssentialsDB or {}
-            SabotonEssentialsDB.modules = type(SabotonEssentialsDB.modules) == "table" and SabotonEssentialsDB.modules or {}
-            SabotonEssentialsDB.modules.spyenhancement = type(SabotonEssentialsDB.modules.spyenhancement) == "table" and SabotonEssentialsDB.modules.spyenhancement or {}
-            SabotonEssentialsDB.modules.spyenhancement.state = state
+    if type(state) ~= "table" then return end
+
+    persistentState = {
+        syncState = type(state.syncState) == "table" and state.syncState or { lastSyncTime = 0, syncedWith = {} },
+        cyrillicCache = type(state.cyrillicCache) == "table" and state.cyrillicCache or {},
+        listState = type(state.listState) == "table" and state.listState or nil,
+    }
+    if type(state.data) == "table" then
+        persistentState.syncState = type(state.data.syncState) == "table"
+            and state.data.syncState or persistentState.syncState
+        pendingLegacyData = state.data
+        if spy and migrateLegacyPlayerLists(pendingLegacyData) then
+            pendingLegacyData = nil
         end
     end
+end
+
+function SpyEnhancement:GetSyncView()
+    local ready = spy and getSpyPlayerList() and getWatchedGuilds()
+    local progress = sync and sync:GetProgress() or { status = "Spy unavailable", active = false }
+    local players, guilds = 0, 0
+    for _ in pairs(getSpyPlayerList() or {}) do players = players + 1 end
+    for _ in pairs(getWatchedGuilds() or {}) do guilds = guilds + 1 end
+    local confirmed = getPersistentState().syncState.lastConfirmedTime
+    return {
+        status = not options.networkSyncEnabled and "disabled" or progress.status,
+        summary = string.format("Spy lists: %d KoS players, %d watched guilds.\nLast confirmed exchange: %s",
+            players, guilds, confirmed > 0 and date("%Y-%m-%d %H:%M:%S", confirmed) or "Never"),
+        progress = string.format("%d active exchange(s); %d imported, %d requested names remaining.\n%d peer exchange(s) confirmed in the last initiated round.",
+            progress.sessions or 0, progress.received or 0, progress.pending or 0, progress.peers or 0),
+        canSync = not not (ready and settingsRestored and options.networkSyncEnabled and not progress.active
+            and IsInGuild and IsInGuild()),
+        canCancel = progress.active,
+    }
+end
+
+function SpyEnhancement:GetSuppressedImports()
+    if not spy or not getSpyPlayerList() or not getWatchedGuilds() then return {} end
+    localRecords()
+    local entries = {}
+    for _, kind in ipairs({ "P", "G" }) do
+        for key in pairs(listBookkeeping(kind).suppressed) do
+            if type(key) == "string" and key:sub(1, 2) == kind .. "\t" then
+                entries[#entries + 1] = {
+                    key = key, kind = kind, name = key:sub(3),
+                    label = (kind == "P" and "Player: " or "Guild: ") .. key:sub(3),
+                }
+            end
+        end
+    end
+    table.sort(entries, function(a, b) return a.key < b.key end)
+    return entries
+end
+
+function SpyEnhancement:AllowSyncImport(key)
+    if not recordKey(key) or not spy then return false end
+    localRecords()
+    local kind = key:sub(1, 1)
+    listBookkeeping(kind).suppressed[recordKey(key)] = nil
+    if addon.SaveSettings then addon.SaveSettings() end
+    return true
 end
 
 function SpyEnhancement:GetOptionsSchema()
     return {
+        name = "Spy Enhancement",
+        dashboard = {
+            description = "Reconcile Spy lists with v4 guild peers. Enabling sync allows replies/imports. KoS reason sharing is opt-in and includes custom text; incoming reasons only fill empty fields. Guild reasons stay local. Restrictions defer work. Edit lists in Spy.",
+            view = function() return self:GetSyncView() end,
+            suppressed = function() return self:GetSuppressedImports() end,
+            allow = function(key) return self:AllowSyncImport(key) end,
+            sync = function() self:Broadcast() end,
+            cancel = function() if sync then sync:Cancel() end end,
+        },
         options = {
             {
-                key = "enabled",
                 type = "checkbox",
-                label = "SpyEnhancement Enabled",
-                get = function() return options.enabled end,
-                set = function(val) options.enabled = val end,
+                key = "networkSyncEnabled",
+                label = "Enable guild sync",
+                tooltip = "Allows manual sync, replies to guild peers, and additive imports. All peers need v4. Sending and imports wait during combat/chat restrictions. Incoming KoS reasons never replace a non-empty local reason.",
+                default = true,
+                get = function() return options.networkSyncEnabled end,
+                set = function(value)
+                    options.networkSyncEnabled = value
+                    if sync then
+                        if value and settingsRestored then sync:Start() else sync:Stop() end
+                    end
+                end,
             },
-        }
+            {
+                type = "checkbox",
+                key = "shareKOSReasons",
+                label = "Share KoS reasons",
+                tooltip = "Off by default. Share player KoS preset reasons and custom Other text with guild peers, including for names they already have. Does not share guild reasons. Receiving remains enabled; any non-empty receiver reason wins. Changing this cancels pending work so old snapshots cannot leak reasons.",
+                default = false,
+                get = function() return options.shareKOSReasons end,
+                set = function(value)
+                    if options.shareKOSReasons ~= value and sync then sync:Cancel("reason sharing changed; start a new sync") end
+                    options.shareKOSReasons = value
+                end,
+            },
+            {
+                type = "checkbox",
+                key = "showSyncNotifications",
+                label = "Show completion notifications",
+                tooltip = "Show routine peer and round completion messages. Errors and explicit command feedback remain visible.",
+                default = true,
+                get = function() return options.showSyncNotifications end,
+                set = function(value) options.showSyncNotifications = value end,
+            },
+        },
     }
+end
+
+local function initializeSpyIntegration()
+    spy = _G.Spy
+    if type(spy) ~= "table" or not getSpyPlayerList() or not getWatchedGuilds()
+        or type(SpyPerCharDB.PlayerData) ~= "table"
+        or type(spy.AddKOSData) ~= "function" or type(spy.UpdatePlayerStatus) ~= "function"
+        or type(spy.RemoveIgnoreData) ~= "function" or type(spy.ToggleGuild) ~= "function" then return false end
+
+    if not sync then
+        sync = addon.GuildSync.New({
+            prefix = "SabotonGuild4",
+            identity = identity,
+            scope = syncScope,
+            key = recordKey,
+            contentKey = recordContentKey,
+            snapshot = localRecords,
+            apply = applyRecord,
+            enabled = function() return settingsRestored and options.networkSyncEnabled end,
+            ready = function() return getSpyPlayerList() ~= nil and getWatchedGuilds() ~= nil end,
+            notify = function(message, routine)
+                if not routine or options.showSyncNotifications then addon.Print("SpyEnhancement: " .. message) end
+            end,
+            confirmed = function(sender, added)
+                local state = getPersistentState().syncState
+                state.lastSyncTime, state.lastConfirmedTime = time(), time()
+                recordSync(sender)
+                if addon.SaveSettings then addon.SaveSettings() end
+                if options.showSyncNotifications then
+                    addon.Print(string.format("SpyEnhancement: Confirmed exchange with %s; imported %d entries.", sender, added))
+                end
+            end,
+        })
+    end
+    if settingsRestored and options.networkSyncEnabled then sync:Start() end
+
+    if pendingLegacyData and migrateLegacyPlayerLists(pendingLegacyData) then
+        pendingLegacyData = nil
+    end
+    if settingsRestored and not importsRestricted() then
+        local records, err = localRecords()
+        if not records then addon.Print("SpyEnhancement: " .. err) end
+    end
+    return true
+end
+
+function SpyEnhancement:FinishRestore()
+    settingsRestored = true
+    initializeSpyIntegration()
 end
 
 function SpyEnhancement:OnEnable()
-    -- Check if Spy is available
-    if not LibStub then
-        addon.Print("SpyEnhancement: LibStub not found. Module disabled.")
-        return
+    getPersistentState()
+    if not pendingLegacyData and type(SabotonEssentialsDB) == "table"
+        and type(SabotonEssentialsDB.spyenhancement) == "table" then
+        pendingLegacyData = SabotonEssentialsDB.spyenhancement
     end
+    initializeSpyIntegration()
 
-    local aceAddon = LibStub:GetLibrary("AceAddon-3.0", true)
-    if not aceAddon then
-        addon.Print("SpyEnhancement: AceAddon-3.0 not found. Module disabled.")
-        return
-    end
-
-    local spy = aceAddon:GetAddon("Spy", true)
-    if not spy then
-        addon.Print("SpyEnhancement: Spy addon not detected. Module disabled.")
-        return
-    end
-
-    spyAvailable = true
-    
-    -- Check for AceComm (Phase 4)
-    local aceComm = getAceComm()
-    local aceSerializer = LibStub:GetLibrary("AceSerializer-3.0", true)
-    if aceComm and aceSerializer then
-        aceCommAvailable = true
-        addon.Print("SpyEnhancement: Loaded (Phase 1-4: KoS Sync + Guild Tagging + Cyrillic + Network)")
-        
-        -- Register message handler for network sync
-        if options.networkSyncEnabled then
-            NetworkSync:RegisterMessageHandler()
+    initializationFrame = CreateFrame("Frame")
+    initializationFrame:RegisterEvent("ADDON_LOADED")
+    initializationFrame:RegisterEvent("PLAYER_LOGIN")
+    initializationFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+    initializationFrame:RegisterEvent("ADDON_RESTRICTION_STATE_CHANGED")
+    initializationFrame:SetScript("OnEvent", function(_, event, loadedAddon, state)
+        if event == "PLAYER_LOGIN" or loadedAddon == "Spy"
+            or event == "PLAYER_REGEN_ENABLED" or (event == "ADDON_RESTRICTION_STATE_CHANGED"
+                and Enum and state == Enum.AddOnRestrictionState.Inactive) then
+            local function initialize()
+                if initializeSpyIntegration() then
+                    initializationFrame:UnregisterEvent("ADDON_LOADED")
+                    initializationFrame:UnregisterEvent("PLAYER_LOGIN")
+                end
+            end
+            if C_Timer and C_Timer.After then C_Timer.After(0, initialize) else initialize() end
         end
+    end)
+end
+
+function SpyEnhancement:OnDisable()
+    if sync then sync:Stop() end
+    if initializationFrame then initializationFrame:UnregisterAllEvents() end
+end
+
+local function printStatus()
+    local players = getSpyPlayerList() or {}
+    local guilds = getWatchedGuilds() or {}
+    local syncState = getPersistentState().syncState
+    local counts = countCache()
+    local playerCount, guildCount = 0, 0
+    for _ in pairs(players) do playerCount = playerCount + 1 end
+    for _ in pairs(guilds) do guildCount = guildCount + 1 end
+    addon.Print(string.format("Spy lists: %d KoS players, %d watched guilds.", playerCount, guildCount))
+    addon.Print(string.format("Last confirmed exchange: %s; known peers: %d.",
+        (syncState.lastConfirmedTime or 0) > 0 and date("%Y-%m-%d %H:%M:%S", syncState.lastConfirmedTime) or "Never",
+        #syncState.syncedWith))
+    addon.Print("Guild sync: " .. (sync and sync:GetStatus() or "Spy unavailable"))
+    addon.Print("KoS reason sharing: " .. (options.shareKOSReasons and "on" or "off")
+        .. " (outgoing); incoming reasons only fill empty fields.")
+    addon.Print(string.format("Cyrillic cache: %d Russian, %d Ukrainian, %d unclear.",
+        counts.russian, counts.ukrainian, counts.unclear))
+end
+
+local function detectAndPrint(kind, text)
+    local result = analyzeText(text, kind)
+    if not result then
+        addon.Print("Usage: /saboton spyenhancement detect [player|guild] <name>")
+    elseif not result.nationality then
+        addon.Print(string.format("%s: No Cyrillic letters detected.", text))
+    elseif result.nationality == "unclear" then
+        addon.Print(string.format("%s: Cyrillic detected, but the language is unclear.", text))
     else
-        addon.Print("SpyEnhancement: Loaded (Phase 1-3: KoS Sync + Guild Tagging + Cyrillic)")
-        if not aceComm then
-            addon.Print("  Note: AceComm-3.0 not available - network sync disabled")
-        end
-        if not aceSerializer then
-            addon.Print("  Note: AceSerializer-3.0 not available - network sync disabled")
-        end
-    end
-
-    -- Initialize database
-    getDB()
-    
-    -- Register with Spy's options if available
-    if spy.RegisterModuleOptions and options.enabled then
-        spy:RegisterModuleOptions("SabotonEnhancements", self:GetSpyOptionsTable(), "Sabaton Enhancements")
+        addon.Print(string.format("%s: Likely %s based on language-specific Cyrillic letters.", text, result.nationality))
     end
 end
 
-function SpyEnhancement:GetSpyOptionsTable()
-    return {
-        type = "group",
-        name = "Sabaton Enhancements",
-        desc = "Enhancement options for Spy integration",
-        args = {
-            header = {
-                type = "header",
-                name = "Sabaton Enhancements for Spy",
-                order = 1,
-            },
-            kosInfo = {
-                type = "description",
-                name = string.format("Phase 1: KoS Sync Active\nCurrent KoS entries: %d", KoSSync:GetCount()),
-                order = 2,
-            },
-            kosStats = {
-                type = "header",
-                name = "KoS Statistics",
-                order = 10,
-            },
-            kosStatsDesc = {
-                type = "description",
-                name = function()
-                    local stats = KoSSync:GetStats()
-                    return string.format("Personal: %d | Synced: %d | Active: %d | Rejected: %d",
-                        stats.personal, stats.synced, stats.active, stats.rejected)
-                end,
-                order = 11,
-            },
-            phase2Header = {
-                type = "header",
-                name = "Phase 2: Guild Tagging (ACTIVE)",
-                order = 20,
-            },
-            guildStats = {
-                type = "description",
-                name = function()
-                    local stats = GuildTag:GetStats()
-                    return string.format("Hostile Guilds: %d | Tracked Members: %d | Rejected: %d",
-                        stats.active, stats.trackedMembers, stats.rejected)
-                end,
-                order = 21,
-            },
-            phase3Header = {
-                type = "header",
-                name = "Phase 3: Cyrillic Detection (ACTIVE)",
-                order = 30,
-            },
-            cyrillicStats = {
-                type = "description",
-                name = function()
-                    local stats = CyrillicDetector:GetStats()
-                    return string.format("Russian (🇷🇺): %d | Ukrainian (🇺🇦): %d | Unclear (❓): %d | Cached: %d",
-                        stats.russian, stats.ukrainian, stats.unclear, stats.total)
-                end,
-                order = 31,
-            },
-            phase4Header = {
-                type = "header",
-                name = "Phase 4: Network Sync " .. (aceCommAvailable and "(ACTIVE)" or "(UNAVAILABLE)"),
-                order = 40,
-            },
-            networkStats = {
-                type = "description",
-                name = function()
-                    if aceCommAvailable then
-                        local stats = NetworkSync:GetStats()
-                        return string.format("Status: Connected | Last Sync: %s | Synced With: %d guildies",
-                            stats.lastSyncTime > 0 and date("%H:%M:%S", stats.lastSyncTime) or "Never",
-                            stats.syncedWith)
-                    else
-                        return "Status: AceComm/AceSerializer not available"
-                    end
-                end,
-                order = 41,
-            },
-        }
-    }
-end
-
-function SpyEnhancement:HandleCommand(args)
-    if not spyAvailable then
-        addon.Print("SpyEnhancement: Spy addon is not loaded.")
-        return
-    end
-
-    local subcommand, rest = string.match(args or "", "^(%S*)%s*(.*)$")
-    subcommand = string.lower(subcommand or ""):match("^(%S*)") or ""
-
-    if subcommand == "" or subcommand == "help" then
-        self:PrintHelp()
-        return
-    end
-
-    -- UI commands (delegated to SpyEnhancementUI module)
-    if subcommand == "ui" or subcommand == "window" then
-        local uiModule = addon.modules.spyenhancementui
-        if uiModule then
-            uiModule:HandleCommand(rest or "ui")
-        else
-            addon.Print("SpyEnhancementUI module not loaded")
+local function detectSpyLists(onlyGuilds)
+    local found = 0
+    if not onlyGuilds then
+        local playerList = getSpyPlayerList()
+        if not playerList then
+            addon.Print("SpyEnhancement: Spy's KoS list is unavailable.")
+            return
         end
-        return
-    end
-
-    if subcommand == "status" then
-        local kosStats = KoSSync:GetStats()
-        addon.Print("SpyEnhancement Status:")
-        addon.Print("")
-        addon.Print("  KoS Sync:")
-        addon.Print(string.format("    Active: %d", kosStats.active))
-        addon.Print(string.format("    Personal: %d | Synced: %d | Rejected: %d", 
-            kosStats.personal, kosStats.synced, kosStats.rejected))
-        
-        if aceCommAvailable then
-            local networkStats = NetworkSync:GetStats()
-            addon.Print("")
-            addon.Print("  Network Sync:")
-            addon.Print("    Status: Connected (AceComm available)")
-            addon.Print(string.format("    Last broadcast: %s",
-                networkStats.lastSyncTime > 0 and date("%Y-%m-%d %H:%M:%S", networkStats.lastSyncTime) or "Never"))
-            addon.Print(string.format("    Synced with: %d guildies", networkStats.syncedWith))
-            if networkStats.syncedWith > 0 then
-                for _, guildie in ipairs(networkStats.syncedWithList) do
-                    addon.Print(string.format("      - %s", guildie))
+        for name in pairs(playerList) do
+            local result = analyzeText(name, "player")
+            if result and result.nationality then
+                found = found + 1
+                addon.Print(string.format("Player %s: %s", name, result.nationality))
+            end
+            local playerData = type(SpyPerCharDB.PlayerData) == "table" and SpyPerCharDB.PlayerData[name]
+            local guildName = type(playerData) == "table" and playerData.guild
+            if validName(guildName) then
+                result = analyzeText(guildName, "guild")
+                if result and result.nationality then
+                    found = found + 1
+                    addon.Print(string.format("Guild %s: %s", guildName, result.nationality))
                 end
             end
-        else
-            addon.Print("")
-            addon.Print("  Network Sync:")
-            addon.Print("    Status: Unavailable (AceComm/AceSerializer not found)")
         end
-        return
     end
 
-    if subcommand == "sync" then
-        KoSSync:ManualSync()
-        return
-    end
-
-    if subcommand == "add" then
-        local playerName = string.match(rest, "^(%S+)")
-        if not playerName then
-            addon.Print("Usage: /saboton spyenhancement add <name> [notes]")
-            return
-        end
-        local notes = string.match(rest, "^%S+%s+(.+)$") or ""
-        KoSSync:Add(playerName, nil, notes)
-        return
-    end
-
-    if subcommand == "remove" or subcommand == "rm" then
-        local playerName = string.match(rest, "^(%S+)")
-        if not playerName then
-            addon.Print("Usage: /saboton spyenhancement remove <name>")
-            return
-        end
-        KoSSync:Remove(playerName)
-        return
-    end
-
-    if subcommand == "reject" then
-        local playerName = string.match(rest, "^(%S+)")
-        if not playerName then
-            addon.Print("Usage: /saboton spyenhancement reject <name> [reason]")
-            return
-        end
-        local reason = string.match(rest, "^%S+%s+(.+)$") or ""
-        KoSSync:Reject(playerName, nil, reason)
-        return
-    end
-
-    if subcommand == "accept" then
-        local playerName = string.match(rest, "^(%S+)")
-        if not playerName then
-            addon.Print("Usage: /saboton spyenhancement accept <name>")
-            return
-        end
-        KoSSync:Accept(playerName)
-        return
-    end
-
-    if subcommand == "list" then
-        local entries = KoSSync:GetAll()
-        if #entries == 0 then
-            addon.Print("No KoS entries")
-            return
-        end
-        addon.Print(string.format("KoS List (%d entries):", #entries))
-        for i, entry in ipairs(entries) do
-            local source = entry.source == "personal" and "[Personal]" or "[Synced]"
-            addon.Print(string.format("  %d. %s %s (added by %s)", i, entry.playerName, source, entry.addedBy))
-            if entry.notes ~= "" then
-                addon.Print(string.format("     Notes: %s", entry.notes))
-            end
-        end
-        return
-    end
-
-    -- ========================================================================
-    -- GUILD TAGGING COMMANDS (Phase 2)
-    -- ========================================================================
-
-    if subcommand == "addguild" then
-        local guildName = string.match(rest, "^(%S+)")
-        if not guildName then
-            addon.Print("Usage: /saboton spyenhancement addguild <guildname> [notes]")
-            return
-        end
-        local notes = string.match(rest, "^%S+%s+(.+)$") or ""
-        GuildTag:Add(guildName, notes)
-        return
-    end
-
-    if subcommand == "removeguild" or subcommand == "rmguild" then
-        local guildName = string.match(rest, "^(%S+)")
-        if not guildName then
-            addon.Print("Usage: /saboton spyenhancement removeguild <guildname>")
-            return
-        end
-        GuildTag:Remove(guildName)
-        return
-    end
-
-    if subcommand == "rejectguild" then
-        local guildName = string.match(rest, "^(%S+)")
-        if not guildName then
-            addon.Print("Usage: /saboton spyenhancement rejectguild <guildname> [reason]")
-            return
-        end
-        local reason = string.match(rest, "^%S+%s+(.+)$") or ""
-        GuildTag:Reject(guildName, reason)
-        return
-    end
-
-    if subcommand == "acceptguild" then
-        local guildName = string.match(rest, "^(%S+)")
-        if not guildName then
-            addon.Print("Usage: /saboton spyenhancement acceptguild <guildname>")
-            return
-        end
-        GuildTag:Accept(guildName)
-        return
-    end
-
-    if subcommand == "guildlist" then
-        local guilds = GuildTag:GetAll()
-        if #guilds == 0 then
-            addon.Print("No hostile guilds")
-            return
-        end
-        addon.Print(string.format("Hostile Guilds (%d):", #guilds))
-        for i, guild in ipairs(guilds) do
-            addon.Print(string.format("  %d. [%s] %d members, last seen: %s ago",
-                i,
-                guild.guildName,
-                guild.memberCount,
-                guild.lastSeen > 0 and math.floor((time() - guild.lastSeen) / 60) .. "m" or "never"))
-            if guild.notes ~= "" then
-                addon.Print(string.format("     Notes: %s", guild.notes))
-            end
-        end
-        return
-    end
-
-    if subcommand == "guildmembers" then
-        local guildName = string.match(rest, "^(%S+)")
-        if not guildName then
-            addon.Print("Usage: /saboton spyenhancement guildmembers <guildname>")
-            return
-        end
-        
-        local members = GuildTag:GetMembers(guildName)
-        if #members == 0 then
-            addon.Print(string.format("No members tracked for guild %s", guildName))
-            return
-        end
-        
-        addon.Print(string.format("Members of [%s] (%d):", guildName, #members))
-        for i, member in ipairs(members) do
-            local seenAgo = math.floor((time() - member.updated) / 60)
-            addon.Print(string.format("  %d. %s (last seen: %dm ago)", i, member.playerName, seenAgo))
-        end
-        return
-    end
-
-    -- ========================================================================
-    -- CYRILLIC DETECTION COMMANDS (Phase 3)
-    -- ========================================================================
-
-    if subcommand == "detect" then
-        local playerName = string.match(rest, "^(%S+)")
-        if not playerName then
-            addon.Print("Usage: /saboton spyenhancement detect <name>")
-            return
-        end
-
-        local result = CyrillicDetector:Detect(playerName)
-        if result == nil then
-            addon.Print(string.format("%s: No Cyrillic characters detected", playerName))
-        elseif result == "russian" then
-            addon.Print(string.format("%s: Likely Russian 🇷🇺", playerName))
-        elseif result == "ukrainian" then
-            addon.Print(string.format("%s: Likely Ukrainian 🇺🇦", playerName))
-        elseif result == "unclear" then
-            addon.Print(string.format("%s: Unclear/Mixed Cyrillic ❓", playerName))
-        end
-        return
-    end
-
-    if subcommand == "cyrillicstats" then
-        local stats = CyrillicDetector:GetStats()
-        addon.Print("Cyrillic Detection Statistics:")
-        addon.Print(string.format("  Russian (🇷🇺): %d", stats.russian))
-        addon.Print(string.format("  Ukrainian (🇺🇦): %d", stats.ukrainian))
-        addon.Print(string.format("  Unclear (❓): %d", stats.unclear))
-        addon.Print(string.format("  Total cached: %d", stats.total))
-        return
-    end
-
-    if subcommand == "clearcyrillicache" then
-        CyrillicDetector:ClearAllCache()
-        addon.Print("SpyEnhancement: Cyrillic cache cleared")
-        return
-    end
-
-    if subcommand == "detectkos" then
-        -- Detect all KoS entries
-        local entries = KoSSync:GetAll()
-        if #entries == 0 then
-            addon.Print("No KoS entries to scan")
-            return
-        end
-
-        addon.Print(string.format("Scanning %d KoS entries for Cyrillic...", #entries))
-        local batch = {}
-        for _, entry in ipairs(entries) do
-            table.insert(batch, entry.playerName)
-        end
-
-        local results = CyrillicDetector:DetectBatch(batch)
-        for nationality, players in pairs(results) do
-            local flag = nationality == "russian" and "🇷🇺" or nationality == "ukrainian" and "🇺🇦" or "❓"
-            addon.Print(string.format("%s (%s): %d players", flag, nationality, #players))
-            for i, playerName in ipairs(players) do
-                if i <= 5 then  -- Show first 5
-                    addon.Print(string.format("  - %s", playerName))
+    local guilds = getWatchedGuilds()
+    if guilds then
+        for key, entry in pairs(guilds) do
+            local name = type(entry) == "table" and entry.name or key
+            if validName(name) then
+                local result = analyzeText(name, "guild")
+                if result and result.nationality then
+                    found = found + 1
+                    addon.Print(string.format("Guild %s: %s", name, result.nationality))
                 end
             end
-            if #players > 5 then
-                addon.Print(string.format("  ... and %d more", #players - 5))
-            end
         end
-        return
     end
 
-    addon.Print("Unknown command. Use '/saboton spyenhancement help'")
+    if found == 0 then addon.Print("No Cyrillic names found in the selected Spy lists.") end
 end
 
-function SpyEnhancement:PrintHelp()
-    addon.Print("SpyEnhancement Commands (Phase 1-4: KoS Sync + Guild Tagging + Cyrillic + Network):")
-    addon.Print("")
-    addon.Print("  UI Commands:")
-    addon.Print("    /saboton spyenhancement ui              - Open main window")
-    addon.Print("    /saboton spyenhancement status          - Show detailed status (CLI)")
-    addon.Print("")
-    addon.Print("  KoS Commands:")
-    addon.Print("    /saboton spyenhancement sync            - Broadcast KoS to guild (network)")
-    addon.Print("    /saboton spyenhancement add <name>      - Add player to personal KoS")
-    addon.Print("    /saboton spyenhancement remove <name>   - Remove from personal KoS")
-    addon.Print("    /saboton spyenhancement list            - List all KoS entries")
-    addon.Print("    /saboton spyenhancement reject <name>   - Reject synced entry")
-    addon.Print("    /saboton spyenhancement accept <name>   - Re-accept rejected entry")
-    addon.Print("")
-    addon.Print("  Guild Commands (Phase 2):")
-    addon.Print("    /saboton spyenhancement addguild <name>      - Mark guild as hostile")
-    addon.Print("    /saboton spyenhancement removeguild <name>   - Remove guild from list")
-    addon.Print("    /saboton spyenhancement guildlist            - List all hostile guilds")
-    addon.Print("    /saboton spyenhancement guildmembers <name>  - Show tracked members")
-    addon.Print("    /saboton spyenhancement rejectguild <name>   - Reject guild locally")
-    addon.Print("    /saboton spyenhancement acceptguild <name>   - Re-accept guild")
-    addon.Print("")
-    addon.Print("  Cyrillic Detection Commands (Phase 3):")
-    addon.Print("    /saboton spyenhancement detect <name>        - Detect player nationality (🇷🇺/🇺🇦/❓)")
-    addon.Print("    /saboton spyenhancement cyrillicstats         - Show Cyrillic detection statistics")
-    addon.Print("    /saboton spyenhancement detectkos             - Scan all KoS entries for Cyrillic")
-    addon.Print("    /saboton spyenhancement clearcyrillicache     - Clear cached results")
-    addon.Print("")
-    addon.Print("    /saboton spyenhancement help                  - Show this help")
+function SpyEnhancement:HandleCommand(message)
+    local command, rest = string.match(message or "", "^(%S*)%s*(.*)$")
+    command = string.lower(command or "")
+
+    if command == "" or command == "help" then
+        addon.Print("SpyEnhancement: options | sync | cancel | status | debug | allowsync [player|guild] <name> | detect [player|guild] <name> | detectkos | detectguilds | cyrillicstats | clearcyrillicache")
+    elseif command == "options" then
+        if addon.modules and addon.modules.options then addon.modules.options:HandleCommand("spyenhancement")
+        else addon.Print("SpyEnhancement: Options are unavailable.") end
+    elseif command == "sync" then
+        self:Broadcast()
+    elseif command == "debug" then
+        if sync then sync:SetDebug(not sync.debug)
+        else addon.Print("SpyEnhancement: Sync debug unavailable; Spy is not ready.") end
+    elseif command == "cancel" then
+        if sync then sync:Cancel() end
+        addon.Print("SpyEnhancement: Pending guild sync canceled.")
+    elseif command == "allowsync" then
+        local kind, name = rest:match("^(%S+)%s+(.+)$")
+        local code = kind == "player" and "P" or kind == "guild" and "G"
+        local key = code and recordKey(code .. "\t" .. trim(name))
+        if not key or not spy then
+            addon.Print("Usage: /saboton spyenhancement allowsync [player|guild] <name>")
+        else
+            self:AllowSyncImport(key)
+            addon.Print("SpyEnhancement: This name may be imported on the next sync.")
+        end
+    elseif command == "status" then
+        printStatus()
+    elseif command == "detect" then
+        local kind, text = rest:match("^(%S+)%s+(.+)$")
+        kind = kind and kind:lower()
+        if kind ~= "player" and kind ~= "guild" then
+            kind, text = "player", rest
+        end
+        detectAndPrint(kind, trim(text or ""))
+    elseif command == "detectkos" then
+        detectSpyLists(false)
+    elseif command == "detectguilds" then
+        detectSpyLists(true)
+    elseif command == "cyrillicstats" then
+        local counts = countCache()
+        addon.Print(string.format("Cyrillic cache: %d Russian, %d Ukrainian, %d unclear, %d total.",
+            counts.russian, counts.ukrainian, counts.unclear, counts.total))
+    elseif command == "clearcyrillicache" then
+        getPersistentState().cyrillicCache = {}
+        addon.Print("SpyEnhancement: Cyrillic cache cleared.")
+    else
+        addon.Print("Unknown command. Use '/saboton spyenhancement help'.")
+    end
 end
 
 addon.RegisterModule("spyenhancement", SpyEnhancement)

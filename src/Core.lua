@@ -49,11 +49,16 @@ function addon.ApplySettings(data)
                     if spec.set and type(value) == expected and (expected ~= "number" or (value == value and math.abs(value) < math.huge)) then spec.set(value) end
                 end
             end
-            if module.FinishRestore then module:FinishRestore(values.state) end
         end
     end
     applyingSettings = false
     persistenceReady = true
+    for name, module in pairs(addon.modules) do
+        local values = modules[name]
+        if module.FinishRestore then
+            module:FinishRestore(type(values) == "table" and values.state or nil)
+        end
+    end
 end
 
 local function printHelp()

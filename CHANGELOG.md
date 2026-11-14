@@ -1,5 +1,50 @@
 # Saboton Essentials - Changelog
 
+## [0.3.0-beta.6] - 2026-11-14
+
+- Add **Share KoS reasons**, off by default, to modern/fallback options. Opted-in senders share player preset reasons and custom Other text; guild reasons remain local. Receiving does not require enabling outbound sharing.
+- Fill empty receiver reason fields, including for names already on both lists. Any non-empty receiver reason always wins, including reasons edited during transfer or existing on a player not yet in KoS. No merging, replacement, or remote clearing.
+- Use incompatible v4 prefix `SabotonGuild4` and reason-aware fingerprints; all participants must update. Transfer long records in bounded, acknowledged chunks and stream one requested record at a time. Invalid/oversized reasons fail explicitly without truncation. Changing sharing cancels queued snapshots.
+- Extend tests for default-off privacy, persistence, conflicting reasons, localization of Other, existing-name updates, suppressed removals, chunk loss/tampering, byte limits, and bounded send queues. In-game reason transfer still needs verification.
+
+## [0.3.0-beta.5] - 2026-11-14
+
+- Fix imported KoS names being counted without appearing in Spy's menu: create/update Spy player metadata, set its KoS marker, clear conflicting ignore membership, and update Spy's central character-sharing store when enabled.
+- Repair incomplete player metadata for previously tracked imports after settings restoration or after local combat/chat restrictions clear, even with guild sync disabled. Preserve existing reasons, class/level data, and KoS timestamps; do not resurrect removed imports.
+- Apply the same complete insertion path to legacy migration, refresh Spy's lists/stats, and reject imports whose player metadata could not be created instead of confirming success.
+
+## [0.3.0-beta.4] - 2026-11-14
+
+- Increase bounded discovery capacity to 32 peers; jitter starts, coalesce repeated starts and outdated offers, and alternate discovery replies with data to avoid starvation during long transfers.
+- Fail and release sessions after 3 minutes without valid progress, excluding local combat/chat pauses. Roster disconnects release sessions immediately; remaining peers can continue and imported names stay intact.
+- Return abandoned discovery responders to idle and add twenty-client burst, packet-loss, disconnect/reconnect, and exact timeout-boundary tests.
+- Document sync setup, status meanings, timeout/retry behavior, diagnostic capture, and the difference between confirmed per-peer transfers and guild-wide convergence. All ten mocked Lua suites pass; live large-group recovery testing remains pending.
+
+## [0.3.0-beta.3] - 2026-11-14
+
+- Normalize Forever's space-separated guild-message names to Spy's hyphenated surname identities. Fixes treating own broadcasts as concurrent peers and mismatching addressed replies. Regression coverage verifies single/concurrent initiation and the nine-target/one-shared-target union with both roster formats.
+
+## [0.3.0-beta.2] - 2026-11-14
+
+- Added opt-in, bounded sync chat diagnostics via `/saboton spyenhancement debug`, including identities, discovery arbitration, send results, and rejected messages. Status now includes send/receive counters to investigate the live concurrent-sync stall.
+
+## [0.3.0-beta.1] - 2026-11-14
+
+- Fixed guild sync staying deferred on Forever's broad outgoing-restriction flag even when addon messaging works. Retain combat/chat-lockdown gates, native send-result handling, and peer acknowledgments.
+
+## [0.3.0-beta] - 2026-11-14
+
+- Added a shared-options Spy dashboard with sync/notification toggles, tooltips, Sync Now/Cancel, live status and list/progress counts, last confirmed exchange, and paged suppressed imports with Allow again. The same controls work in fallback UI via `/saboton spyenhancement options` and the fallback options launch button.
+- Replaced fire-and-forget v2 broadcasts with paced v3 guild discovery, fingerprint comparison, requested-name transfer, and acknowledged bidirectional reconciliation. All peers must update.
+- Defer network sends and imports during combat/chat restrictions; add bounded retries, duplicate protection, cancellation, roster/scope validation, and confirmed-peer status.
+- Preserve Forever surname/ruleset identities. Share names only, never guild reasons or private notes; existing local reasons are unchanged.
+- Remember locally removed imports, with `allowsync` to permit them again. Add a reusable bounded-record sync support component without Ace communication dependencies.
+- Delay networking until settings restoration and declare Spy as an optional load-order dependency. Add simulated multi-client and Spy integration coverage; live Forever transport checks remain required.
+- Replaced the duplicate KoS and guild-tag lists with manual sync of Spy's native KoS-player and watched-guild lists.
+- Removed the separate SpyEnhancement window, minimap button, and tooltip hooks; use Spy's built-in UI to manage and view its lists.
+- Cyrillic analysis now scans UTF-8 player and guild names, classifies Russian/Ukrainian-specific letters, and reports shared letters as unclear.
+- The original 0.2.0-beta SpyEnhancement notes below describe the initial prototype and are superseded by these changes.
+
 ## [0.2.0-beta] - 2026-11-10
 
 ### Added - SpyEnhancement Module

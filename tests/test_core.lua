@@ -11,7 +11,14 @@ DEFAULT_CHAT_FRAME = { AddMessage = function(...) end }
 local addon = {}
 assert(loadfile("src/Core.lua"))("SabotonEssentials", addon)
 local initialized = false
-addon.RegisterModule("extraattack", { OnEnable = function() initialized = true end })
-addon.RegisterModule("options", { OnEnable = function() assert(initialized) end })
+local restored = false
+addon.RegisterModule("extraattack", {
+    OnEnable = function() initialized = true end,
+    FinishRestore = function(_, state)
+        assert(initialized and state == nil)
+        restored = true
+    end,
+})
+addon.RegisterModule("options", { OnEnable = function() assert(initialized and restored) end })
 initFrame.callback(initFrame, "ADDON_LOADED", "SabotonEssentials")
 print("Core initialization tests passed")

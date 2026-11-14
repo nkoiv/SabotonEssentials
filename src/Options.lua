@@ -3,7 +3,7 @@ local ADDON_NAME, addon = ...
 -- Builds one Settings panel from declarative option schemas exposed by other modules
 -- (see each module's GetOptionsSchema), keeping all Settings-API/UI code out of them.
 --
--- When the Settings API is unavailable, the offset sliders use a small fallback window.
+-- Without Settings, retain the offset sliders and expose module dashboards in fallback windows.
 local Options = {}
 
 local settingsAvailable = rawget(_G, "Settings") ~= nil
@@ -18,8 +18,8 @@ local function toVariableKey(moduleKey, optionKey)
     return string.format("SABOTONESSENTIALS_%s_%s", string.upper(moduleKey), string.upper(optionKey))
 end
 
-local function createCheckbox(subcategory, moduleKey, spec)
-    local setting = Settings.RegisterProxySetting(
+local function registerCheckbox(subcategory, moduleKey, spec)
+    return Settings.RegisterProxySetting(
         subcategory,
         toVariableKey(moduleKey, spec.key),
         Settings.VarType.Boolean,
@@ -28,8 +28,10 @@ local function createCheckbox(subcategory, moduleKey, spec)
         spec.get,
         function(value) saveOption(spec, value) end
     )
+end
 
-    Settings.CreateCheckbox(subcategory, setting, spec.tooltip)
+local function createCheckbox(subcategory, moduleKey, spec)
+    Settings.CreateCheckbox(subcategory, registerCheckbox(subcategory, moduleKey, spec), spec.tooltip)
 end
 
 local function createSlider(subcategory, moduleKey, spec)
@@ -82,9 +84,142 @@ local optionBuilders = {
     dropdown = createDropdown,
 }
 
+local function displayText(value)
+    return tostring(value):gsub("|", "||")
+end
+
+local function tooltip(control, text)
+    control:SetScript("OnEnter", function()
+        if not GameTooltip then return end
+        GameTooltip:SetOwner(control, "ANCHOR_RIGHT")
+        GameTooltip:SetText(text, 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    control:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+end
+
+local function createDashboard(parent, schema)
+    local panel = CreateFrame("Frame", nil, parent)
+    panel:SetSize(540, 570)
+    local dashboard = schema.dashboard
+    local function label(text, y, height, font)
+        local item = panel:CreateFontString(nil, "OVERLAY", font or "GameFontHighlight")
+        item:SetPoint("TOPLEFT", 12, y)
+        item:SetWidth(510)
+        item:SetHeight(height)
+        item:SetJustifyH("LEFT")
+        item:SetJustifyV("TOP")
+        item:SetText(text)
+        return item
+    end
+    label(schema.name, -12, 24, "GameFontNormalLarge")
+    label(dashboard.description, -42, 62)
+    panel.checkboxes = {}
+    for index, spec in ipairs(schema.options or {}) do
+        local check = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+        check:SetSize(26, 26)
+        check:SetPoint("TOPLEFT", 10, -108 - (index - 1) * 28)
+        local text = check:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        text:SetPoint("LEFT", check, "RIGHT", 4, 0)
+        text:SetText(spec.label)
+        check:SetHitRectInsets(0, -330, 0, 0)
+        tooltip(check, spec.tooltip or spec.label)
+        check:SetScript("OnClick", function(self)
+            saveOption(spec, self:GetChecked() == true)
+            panel:Refresh()
+        end)
+        panel.checkboxes[index] = { control = check, spec = spec }
+    end
+    local function button(text, x, y, width, callback)
+        local control = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        control:SetSize(width, 24)
+        control:SetPoint("TOPLEFT", x, y)
+        control:SetText(text)
+        control:SetScript("OnClick", callback)
+        return control
+    end
+    panel.sync = button("Sync Now", 12, -192, 120, function() dashboard.sync() panel:Refresh() end)
+    panel.cancel = button("Cancel", 142, -192, 100, function() dashboard.cancel() panel:Refresh() end)
+    tooltip(panel.sync, "Reconcile names and optionally shared KoS reasons with v4 guild peers. Existing receiver reasons win. Combat/chat restrictions queue the work.")
+    tooltip(panel.cancel, "Cancel local pending work. Names already imported remain in Spy.")
+    panel.status = label("", -228, 44, "GameFontNormal")
+    panel.summary = label("", -275, 40)
+    panel.progress = label("", -320, 44)
+    label("Removed imports (kept out of future syncs)", -374, 22, "GameFontNormal")
+    panel.rows = {}
+    for index = 1, 4 do
+        local row = {}
+        row.text = label("", -401 - (index - 1) * 28, 24)
+        row.text:SetWidth(370)
+        row.allow = button("Allow again", 400, -397 - (index - 1) * 28, 112, function()
+            if row.key then dashboard.allow(row.key) panel:Refresh() end
+        end)
+        tooltip(row.allow, "Permit this name to be imported on the next sync. This does not immediately add it to Spy.")
+        panel.rows[index] = row
+    end
+    panel.page, panel.pages = 1, 1
+    panel.previous = button("Previous", 12, -518, 100, function()
+        panel.page = math.max(1, panel.page - 1)
+        panel:Refresh()
+    end)
+    panel.next = button("Next", 122, -518, 100, function()
+        panel.page = math.min(panel.pages, panel.page + 1)
+        panel:Refresh()
+    end)
+    panel.pageLabel = label("", -548, 22)
+    function panel:Refresh()
+        local view = dashboard.view()
+        for _, entry in ipairs(self.checkboxes) do entry.control:SetChecked(entry.spec.get()) end
+        self.sync:SetEnabled(view.canSync)
+        self.cancel:SetEnabled(view.canCancel)
+        self.status:SetText(displayText("Status: " .. view.status))
+        self.summary:SetText(displayText(view.summary))
+        self.progress:SetText(displayText(view.progress))
+        local entries = dashboard.suppressed()
+        self.pages = math.max(1, math.ceil(#entries / #self.rows))
+        self.page = math.min(self.page, self.pages)
+        for index, row in ipairs(self.rows) do
+            local entry = entries[(self.page - 1) * #self.rows + index]
+            row.key = entry and entry.key
+            row.text:SetText(entry and displayText(entry.label) or "")
+            row.allow:SetShown(entry ~= nil)
+        end
+        self.previous:SetEnabled(self.page > 1)
+        self.next:SetEnabled(self.page < self.pages)
+        self.pageLabel:SetText(#entries == 0 and "No suppressed imports."
+            or string.format("Page %d / %d (%d names)", self.page, self.pages, #entries))
+    end
+    panel:SetScript("OnShow", function(self) self.elapsed = 0 self:Refresh() end)
+    panel:SetScript("OnUpdate", function(self, elapsed)
+        self.elapsed = (self.elapsed or 0) + elapsed
+        if self.elapsed >= 1 then self.elapsed = 0 self:Refresh() end
+    end)
+    return panel
+end
+
+local function createDashboardWindow(schema)
+    local window = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    window:SetSize(570, 610)
+    window:SetPoint("CENTER")
+    window:SetFrameStrata("DIALOG")
+    window:SetClampedToScreen(true)
+    window:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", edgeSize = 24,
+        insets = { left = 6, right = 6, top = 6, bottom = 6 } })
+    window:EnableMouse(true)
+    local close = CreateFrame("Button", nil, window, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -4, -4)
+    local dashboard = createDashboard(window, schema)
+    dashboard:SetPoint("TOPLEFT", 12, -22)
+    window.dashboard = dashboard
+    window:Hide()
+    window:SetScript("OnShow", function() dashboard:Refresh() end)
+    return window
+end
+
 local function createFallbackPanel()
     local panel = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    panel:SetSize(360, 290)
+    panel:SetSize(360, addon.modules.spyenhancement and 335 or 290)
     panel:SetPoint("CENTER")
     panel:SetFrameStrata("DIALOG")
     panel:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", edgeSize = 24, insets = { left = 6, right = 6, top = 6, bottom = 6 } })
@@ -131,6 +266,13 @@ local function createFallbackPanel()
                 label:SetText(spec.label .. ": " .. string.format(spec.format, spec.get()))
             end
         end
+    end
+    if addon.modules.spyenhancement then
+        local spy = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        spy:SetSize(290, 24)
+        spy:SetPoint("BOTTOM", 0, 24)
+        spy:SetText("Spy Enhancement: sync and options")
+        spy:SetScript("OnClick", function() Options:HandleCommand("spyenhancement") end)
     end
     panel:SetScript("OnShow", function()
         for _, refresh in ipairs(refreshers) do refresh() end
@@ -186,6 +328,17 @@ end
 optionBuilders.text = createTextInput
 
 local function buildModulePanel(rootCategory, moduleKey, schema)
+    if schema.dashboard and Settings.RegisterCanvasLayoutSubcategory then
+        local panel = createDashboard(UIParent, schema)
+        panel:Hide()
+        local subcategory = Settings.RegisterCanvasLayoutSubcategory(rootCategory, panel, schema.name)
+        for _, spec in ipairs(schema.options or {}) do
+            if spec.type == "checkbox" then registerCheckbox(subcategory, moduleKey, spec) end
+        end
+        Options.moduleCategories = Options.moduleCategories or {}
+        Options.moduleCategories[moduleKey] = subcategory
+        return
+    end
     local subcategory = Settings.RegisterVerticalLayoutSubcategory(rootCategory, schema.name or moduleKey)
 
     for _, optionSpec in ipairs(schema.options or {}) do
@@ -214,7 +367,16 @@ function Options:OnEnable()
     self.category = rootCategory
 end
 
-function Options:HandleCommand()
+function Options:HandleCommand(message)
+    if message == "spyenhancement" then
+        local category = self.moduleCategories and self.moduleCategories.spyenhancement
+        if category then Settings.OpenToCategory(category:GetID()) return end
+        local module = addon.modules.spyenhancement
+        if not module then addon.Print("Spy Enhancement options are unavailable.") return end
+        self.spyWindow = self.spyWindow or createDashboardWindow(module:GetOptionsSchema())
+        if self.spyWindow:IsShown() then self.spyWindow:Hide() else self.spyWindow:Show() end
+        return
+    end
     if not settingsAvailable then
         self.fallbackPanel = self.fallbackPanel or createFallbackPanel()
         if self.fallbackPanel:IsShown() then self.fallbackPanel:Hide() else self.fallbackPanel:Show() end

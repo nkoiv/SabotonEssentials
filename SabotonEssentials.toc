@@ -2,17 +2,18 @@
 ## Title: Saboton Essentials
 ## Notes: Extra attack sounds, gathering timers, and configurable death sounds.
 ## Author: nikok
-## Version: 0.2.0-beta
+## Version: 0.3.0-beta.6
 ## DefaultState: enabled
 ## IconTexture: Interface\Icons\Spell_Frost_FrostNova
 ## SavedVariables: SabotonEssentialsDB
+## OptionalDeps: Spy
 
 src\Core.lua
 src\Modules\SqueakyToy.lua
 src\Modules\ExtraAttack.lua
 src\Modules\GatheringTimer.lua
 src\Modules\MinimapButton.lua
+src\Support\GuildSync.lua
 src\Modules\SpyEnhancement.lua
-src\Modules\SpyEnhancementUI.lua
 src\Options.xml
 src\Options.lua

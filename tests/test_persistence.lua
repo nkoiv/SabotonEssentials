@@ -1,7 +1,7 @@
 local frames, controls, messages, lootName
 local methods = {}
 local function noop() end
-for _, name in ipairs({ "SetSize", "SetFrameStrata", "SetFrameLevel", "SetHighlightTexture", "SetTexture", "SetTexCoord", "RegisterForDrag", "SetMovable", "SetClampedToScreen", "EnableMouse", "SetAllPoints", "SetMinMaxValues", "SetValue", "SetStatusBarTexture", "SetOrientation", "SetColorTexture", "SetHeight", "SetWidth", "SetAlpha", "SetStatusBarColor", "SetText", "SetDrawLayer", "StartMoving", "StopMovingOrSizing" }) do
+for _, name in ipairs({ "SetSize", "SetFrameStrata", "SetFrameLevel", "SetHighlightTexture", "SetTexture", "SetTexCoord", "RegisterForDrag", "SetMovable", "SetClampedToScreen", "EnableMouse", "SetAllPoints", "SetMinMaxValues", "SetValue", "SetStatusBarTexture", "SetOrientation", "SetColorTexture", "SetHeight", "SetWidth", "SetAlpha", "SetStatusBarColor", "SetText", "SetDrawLayer", "StartMoving", "StopMovingOrSizing", "SetJustifyH", "SetJustifyV", "SetHitRectInsets", "SetEnabled", "SetChecked" }) do
     methods[name] = noop
 end
 function methods:SetPoint(point, relative, relativePoint, x, y) self.x, self.y = x or 0, y or 0 end
@@ -55,6 +55,7 @@ Settings = {
     VarType = { Boolean = 1, Number = 2, String = 3 },
     RegisterVerticalLayoutCategory = category,
     RegisterVerticalLayoutSubcategory = category,
+    RegisterCanvasLayoutSubcategory = category,
     RegisterAddOnCategory = noop,
     CreateCheckbox = noop,
     CreateSlider = noop,
@@ -84,7 +85,7 @@ local function session(saved)
     DEFAULT_CHAT_FRAME = { AddMessage = function(_, message) messages[#messages + 1] = message end }
     SabotonEssentialsDB = saved
     local addon = {}
-    for _, file in ipairs({ "src/Core.lua", "src/Modules/SqueakyToy.lua", "src/Modules/ExtraAttack.lua", "src/Modules/GatheringTimer.lua", "src/Modules/MinimapButton.lua", "src/Modules/SpyEnhancement.lua", "src/Options.lua" }) do
+    for _, file in ipairs({ "src/Core.lua", "src/Modules/SqueakyToy.lua", "src/Modules/ExtraAttack.lua", "src/Modules/GatheringTimer.lua", "src/Modules/MinimapButton.lua", "src/Support/GuildSync.lua", "src/Modules/SpyEnhancement.lua", "src/Options.lua" }) do
         assert(loadfile(file))("SabotonEssentials", addon)
     end
     fire("ADDON_LOADED", "SabotonEssentials")
@@ -99,8 +100,9 @@ local function said(fragment)
 end
 
 local addon = session(nil)
+assert(not control("SPYENHANCEMENT", "SHAREKOSREASONS").get(), "upgrades must not enable reason sharing")
+control("SPYENHANCEMENT", "SHAREKOSREASONS").set(true)
 slash("gather enable")
-slash("spyenhancement add TargetPlayer Watchlist")
 slash("gather add Mystic Herb herb 60 120")
 slash("gather add Another Herb herb 70 140")
 slash("gather toggle Another Herb")
@@ -123,16 +125,13 @@ button.scripts.OnDragStop(button)
 local saved = SabotonEssentialsDB
 assert(saved.modules.gather.state.minDurationOverride == false)
 assert(saved.modules.gather.state.maxDurationOverride == false)
-assert(saved.modules.spyenhancement.state.data.kosPersonal["targetplayer-testrealm"])
+assert(saved.modules.spyenhancement.state.syncState.lastSyncTime == 0)
 assert(saved.modules.gather.state.position.x == 125 and saved.modules.gather.state.position.y == -95)
 assert(math.abs(saved.modules.minimap.state.angle - 90) < 0.001)
 
 addon = session(saved)
-assert(loadfile("src/Modules/SpyEnhancementUI.lua"))("SabotonEssentials", addon)
-local spyInfo = addon.modules.spyenhancementui.getSpyPlayerInfo("TargetPlayer", "TestRealm")
-assert(spyInfo and spyInfo:find("[Personal KoS]", 1, true), "SpyEnhancement UI did not read persisted KoS data")
-slash("spyenhancement list")
-assert(said("TargetPlayer"), "SpyEnhancement KoS entry was not restored")
+assert(control("SPYENHANCEMENT", "SHAREKOSREASONS").get(), "reason-sharing preference must survive reload")
+assert(addon.modules.spyenhancement:GetPersistentState().syncState.lastSyncTime == 0)
 assert(control("EXTRAATTACK", "COMBOWINDOW").get() == 1.7)
 assert(control("EXTRAATTACK", "COMBOTEXTFORMAT").get() == "Streak %d")
 assert(control("EXTRAATTACK", "TEXTARCDURATION").get() == 1.8)
