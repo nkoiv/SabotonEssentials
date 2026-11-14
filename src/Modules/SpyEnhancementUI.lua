@@ -10,6 +10,19 @@ local miniButton = nil
 local spyAvailable = false
 local spyModule = nil
 
+local function getSpyEnhancementDB()
+    local database = SabotonEssentialsDB
+    if type(database) ~= "table" then return nil end
+
+    local modules = database.modules
+    local moduleSettings = type(modules) == "table" and modules.spyenhancement
+    local state = type(moduleSettings) == "table" and moduleSettings.state
+    if type(state) == "table" and type(state.data) == "table" then
+        return state.data
+    end
+    return database.spyenhancement
+end
+
 -- ============================================================================
 -- UTILITY: FORMAT AND DISPLAY
 -- ============================================================================
@@ -61,7 +74,7 @@ end
 -- Get info to display in Spy for a player
 local function getSpyPlayerInfo(playerName, realm)
     realm = realm or GetRealmName()
-    local spyenhancement = SabotonEssentialsDB and SabotonEssentialsDB.spyenhancement
+    local spyenhancement = getSpyEnhancementDB()
     if not spyenhancement then return nil end
     
     local infoLines = {}
@@ -163,7 +176,7 @@ end
 local function updateMainWindowContent(editBox)
     if not editBox then return end
     
-    local db = SabotonEssentialsDB and SabotonEssentialsDB.spyenhancement or {}
+    local db = getSpyEnhancementDB() or {}
     local lines = {}
     
     table.insert(lines, "=== SPYENHANCEMENT STATUS ===\n")
@@ -362,7 +375,7 @@ local function updateStatusPanel()
         statusPanel = createStatusPanel()
     end
     
-    local db = SabotonEssentialsDB and SabotonEssentialsDB.spyenhancement or {}
+    local db = getSpyEnhancementDB() or {}
     local personal = table.getn(db.kosPersonal or {})
     local synced = table.getn(db.kosSynced or {})
     local guilds = table.getn(db.hosileGuilds or {})

@@ -29,12 +29,22 @@ function GetCursorPosition() return 500, 500 end
 function GetTime() return 0 end
 function issecretvalue() return false end
 function PlaySoundFile() return true end
+function GetRealmName() return "TestRealm" end
+function UnitName() return "TestPlayer" end
+function time() return 100 end
 function GetNumLootItems() return 1 end
 function GetLootSourceInfo() return "GameObject-1" end
 function GetLootSlotLink() return nil end
 function GetLootSlotInfo() return nil, lootName end
 function UIFrameFadeOut() end
 C_Timer = { NewTicker = function() return { Cancel = noop } end, NewTimer = function() return { Cancel = noop } end, After = noop }
+LibStub = {
+    GetLibrary = function(_, name)
+        if name == "AceAddon-3.0" then
+            return { GetAddon = function() return { RegisterModuleOptions = noop } end }
+        end
+    end,
+}
 LOCALIZED_CLASS_NAMES_MALE = setmetatable({}, { __index = function(_, key) return key end })
 MinimalSliderWithSteppersMixin = { Label = { Right = 1 } }
 SettingsControlMixin = {}
@@ -74,7 +84,7 @@ local function session(saved)
     DEFAULT_CHAT_FRAME = { AddMessage = function(_, message) messages[#messages + 1] = message end }
     SabotonEssentialsDB = saved
     local addon = {}
-    for _, file in ipairs({ "src/Core.lua", "src/Modules/SqueakyToy.lua", "src/Modules/ExtraAttack.lua", "src/Modules/GatheringTimer.lua", "src/Modules/MinimapButton.lua", "src/Options.lua" }) do
+    for _, file in ipairs({ "src/Core.lua", "src/Modules/SqueakyToy.lua", "src/Modules/ExtraAttack.lua", "src/Modules/GatheringTimer.lua", "src/Modules/MinimapButton.lua", "src/Modules/SpyEnhancement.lua", "src/Options.lua" }) do
         assert(loadfile(file))("SabotonEssentials", addon)
     end
     fire("ADDON_LOADED", "SabotonEssentials")
@@ -89,6 +99,8 @@ local function said(fragment)
 end
 
 local addon = session(nil)
+slash("gather enable")
+slash("spyenhancement add TargetPlayer Watchlist")
 slash("gather add Mystic Herb herb 60 120")
 slash("gather add Another Herb herb 70 140")
 slash("gather toggle Another Herb")
@@ -111,10 +123,16 @@ button.scripts.OnDragStop(button)
 local saved = SabotonEssentialsDB
 assert(saved.modules.gather.state.minDurationOverride == false)
 assert(saved.modules.gather.state.maxDurationOverride == false)
+assert(saved.modules.spyenhancement.state.data.kosPersonal["targetplayer-testrealm"])
 assert(saved.modules.gather.state.position.x == 125 and saved.modules.gather.state.position.y == -95)
 assert(math.abs(saved.modules.minimap.state.angle - 90) < 0.001)
 
 addon = session(saved)
+assert(loadfile("src/Modules/SpyEnhancementUI.lua"))("SabotonEssentials", addon)
+local spyInfo = addon.modules.spyenhancementui.getSpyPlayerInfo("TargetPlayer", "TestRealm")
+assert(spyInfo and spyInfo:find("[Personal KoS]", 1, true), "SpyEnhancement UI did not read persisted KoS data")
+slash("spyenhancement list")
+assert(said("TargetPlayer"), "SpyEnhancement KoS entry was not restored")
 assert(control("EXTRAATTACK", "COMBOWINDOW").get() == 1.7)
 assert(control("EXTRAATTACK", "COMBOTEXTFORMAT").get() == "Streak %d")
 assert(control("EXTRAATTACK", "TEXTARCDURATION").get() == 1.8)

@@ -34,7 +34,7 @@ function CreateFrame(...)
     function frame:Hide() self.shown = false end
     function frame:SetAlpha(value) self.alpha = value end
     function frame:SetScript(name, callback) self.scripts[name] = callback end
-    function frame:RegisterEvent(...) end
+    function frame:RegisterEvent(event) self.events = self.events or {}; self.events[event] = true end
     function frame:CreateFontString(...)
         local text = {}
         function text:SetPoint(...) end
@@ -138,6 +138,7 @@ display.scripts.OnUpdate(display, 2.9)
 assert(not display.shown and not display.scripts.OnUpdate)
 
 local eventFrame = frames[2]
+assert(eventFrame.events.PLAYER_SWING and eventFrame.events.SPELL_UPDATE_COOLDOWN)
 eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_DISABLED")
 now = 10
 eventFrame.scripts.OnEvent(eventFrame, "PLAYER_SWING", 2, 0)
@@ -166,5 +167,24 @@ module:HandleCommand("soundkey huagh")
 assert(soundOption.get() == "huagh")
 eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
 assert(lastSoundPath == "Interface\\AddOns\\SabotonEssentials\\Media\\HumanMaleAggroA.ogg")
+
+local function displayedComboCount()
+    return tonumber(string.match(display.text.value, "^x(%d+) Ka%-ching!$"))
+end
+local comboBeforeWindfury = displayedComboCount()
+local soundsBeforeWindfury = sounds
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 10608, nil, 0, nil)
+assert(displayedComboCount() == comboBeforeWindfury + 1)
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
+assert(sounds == soundsBeforeWindfury + 1)
+
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 439440, nil, 0, nil)
+assert(displayedComboCount() == comboBeforeWindfury + 3)
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
+assert(sounds == soundsBeforeWindfury + 3)
+
+local comboAfterWindfury = displayedComboCount()
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 12345)
+assert(displayedComboCount() == comboAfterWindfury)
 
 print("Extra Attack animation tests passed")

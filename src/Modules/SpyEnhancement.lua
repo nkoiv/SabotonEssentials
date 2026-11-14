@@ -4,6 +4,7 @@
 -- Phase 3: Cyrillic nationality detection
 -- Phase 4: Network Sync via AceComm (IN PROGRESS)
 
+local ADDON_NAME, addon = ...
 local SpyEnhancement = {}
 local spyAvailable = false
 local aceCommAvailable = false
@@ -81,7 +82,13 @@ local function getDB()
     if not SabotonEssentialsDB then
         SabotonEssentialsDB = {}
     end
-    if not SabotonEssentialsDB.spyenhancement then
+    local modules = SabotonEssentialsDB.modules
+    local moduleSettings = type(modules) == "table" and modules.spyenhancement
+    local state = type(moduleSettings) == "table" and moduleSettings.state
+    if type(state) == "table" and type(state.data) == "table" then
+        return state.data
+    end
+    if type(SabotonEssentialsDB.spyenhancement) ~= "table" then
         SabotonEssentialsDB.spyenhancement = {
             version = 1,
             kosPersonal = {},       -- Player's own KoS entries
@@ -913,13 +920,19 @@ end
 -- ============================================================================
 
 function SpyEnhancement:GetPersistentState()
-    return { enabled = options.enabled, syncMode = options.syncMode }
+    return { enabled = options.enabled, syncMode = options.syncMode, data = getDB() }
 end
 
 function SpyEnhancement:LoadPersistentState(state)
     if type(state) == "table" then
         if type(state.enabled) == "boolean" then options.enabled = state.enabled end
         if type(state.syncMode) == "string" then options.syncMode = state.syncMode end
+        if type(state.data) == "table" then
+            SabotonEssentialsDB = type(SabotonEssentialsDB) == "table" and SabotonEssentialsDB or {}
+            SabotonEssentialsDB.modules = type(SabotonEssentialsDB.modules) == "table" and SabotonEssentialsDB.modules or {}
+            SabotonEssentialsDB.modules.spyenhancement = type(SabotonEssentialsDB.modules.spyenhancement) == "table" and SabotonEssentialsDB.modules.spyenhancement or {}
+            SabotonEssentialsDB.modules.spyenhancement.state = state
+        end
     end
 end
 
@@ -1107,7 +1120,7 @@ function SpyEnhancement:HandleCommand(args)
             local networkStats = NetworkSync:GetStats()
             addon.Print("")
             addon.Print("  Network Sync:")
-            addon.Print(string.format("    Status: Connected (AceComm available)")
+            addon.Print("    Status: Connected (AceComm available)")
             addon.Print(string.format("    Last broadcast: %s",
                 networkStats.lastSyncTime > 0 and date("%Y-%m-%d %H:%M:%S", networkStats.lastSyncTime) or "Never"))
             addon.Print(string.format("    Synced with: %d guildies", networkStats.syncedWith))

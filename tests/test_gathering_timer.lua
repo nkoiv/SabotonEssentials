@@ -42,15 +42,21 @@ local addon = {
 }
 assert(loadfile("src/Modules/GatheringTimer.lua"))("SabotonEssentials", addon)
 module:OnEnable()
+local options = {}
+for _, spec in ipairs(module:GetOptionsSchema().options) do options[spec.key] = spec end
+assert(options.enabled.default == false and options.enabled.get() == false)
+
 module:HandleCommand("min 10")
 module:HandleCommand("max 20")
+frames[#frames].scripts.OnEvent()
+module:HandleCommand("status")
+assert(messages[#messages - 1]:find("Active: none", 1, true))
+options.enabled.set(true)
 frames[#frames].scripts.OnEvent()
 module:HandleCommand("status")
 assert(messages[#messages - 1]:find("Arcane Crystal", 1, true))
 assert(messages[#messages - 1]:find("min 10s / max 20s", 1, true))
 
-local options = {}
-for _, spec in ipairs(module:GetOptionsSchema().options) do options[spec.key] = spec end
 options.minDuration.set(0)
 assert(not module.frame.minBar.shown and not module.frame.minBar.title.shown and module.frame.maxBar.shown and module.frame.maxBar.title.shown)
 now = 10
