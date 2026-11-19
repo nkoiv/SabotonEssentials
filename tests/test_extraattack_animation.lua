@@ -4,6 +4,7 @@ local timers = {}
 local module
 local sounds = 0
 local lastSoundPath
+local burstTimers = {}
 
 UIParent = {}
 Enum = { PlayerSwingType = { MainHand = 0 } }
@@ -21,6 +22,7 @@ end
 function C_Timer.NewTimer(_, callback)
     local timer = { callback = callback }
     function timer:Cancel() self.cancelled = true end
+    burstTimers[#burstTimers + 1] = timer
     return timer
 end
 function C_Timer.After(_, callback) callback() end
@@ -54,13 +56,15 @@ module:OnEnable()
 local options = module:GetOptionsSchema().options
 assert(options[1].get() == true and options[1].default == true)
 local sealOfCommandOption
-local textEnabledOption
+local textEnabledOption, minBurstHitsOption
 for _, option in ipairs(options) do
     if option.key == "countSealOfCommand" then sealOfCommandOption = option end
     if option.key == "textEnabled" then textEnabledOption = option end
+    if option.key == "minBurstHits" then minBurstHitsOption = option end
 end
 assert(sealOfCommandOption and sealOfCommandOption.get() == false and sealOfCommandOption.default == false)
 assert(textEnabledOption)
+assert(minBurstHitsOption and minBurstHitsOption.get() == 1 and minBurstHitsOption.default == 1)
 local display = frames[1]
 
 module:HandleCommand("test")
@@ -210,19 +214,97 @@ local comboAfterWindfury = displayedComboCount()
 eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 12345)
 assert(displayedComboCount() == comboAfterWindfury)
 
-local sealOfCommandSpellIDs = { 20375, 20424, 20915, 20918, 20919, 20920 }
-for _, spellID in ipairs(sealOfCommandSpellIDs) do
-    eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", spellID, nil, 0, nil)
-end
+local soundsBeforeSeal = sounds
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 20424, nil, 0, nil)
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
 assert(displayedComboCount() == comboAfterWindfury)
+assert(sounds == soundsBeforeSeal, "disabled Seal of Command detection must not play a sound")
 
 sealOfCommandOption.set(true)
-for index, spellID in ipairs(sealOfCommandSpellIDs) do
+for _, spellID in ipairs({
+    20375, 20915, 20918, 20919, 20920, -- Seal activation ranks
+    20467, 20963, 20964, 20965, 20966, -- Judgement of Command ranks
+}) do
     eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", spellID, nil, 0, nil)
-    assert(displayedComboCount() == comboAfterWindfury + index)
 end
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
+assert(displayedComboCount() == comboAfterWindfury)
+assert(sounds == soundsBeforeSeal, "seal activation and Judgement must not play a sound")
+
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 20424, nil, 0, nil)
+assert(displayedComboCount() == comboAfterWindfury + 1)
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
+assert(sounds == soundsBeforeSeal + 1, "a Seal of Command proc must play one sound")
+
 sealOfCommandOption.set(false)
-eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 20375, nil, 0, nil)
-assert(displayedComboCount() == comboAfterWindfury + #sealOfCommandSpellIDs)
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 20424, nil, 0, nil)
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
+assert(displayedComboCount() == comboAfterWindfury + 1 and sounds == soundsBeforeSeal + 1)
+
+minBurstHitsOption.set(3)
+local beforeThreshold = sounds
+local comboBeforeThreshold = displayedComboCount()
+local previousText = display.text.value
+local previousAnimationStart = display.startedAt
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 8516)
+local firstBurstTimer = burstTimers[#burstTimers]
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 10608)
+assert(firstBurstTimer.cancelled)
+burstTimers[#burstTimers].callback()
+assert(sounds == beforeThreshold, "a burst below the minimum must be silent")
+assert(display.text.value == previousText and display.startedAt == previousAnimationStart,
+    "a burst below the minimum must not update or restart combo text")
+
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 439440)
+assert(display.text.value == previousText, "two hits must not show text when the minimum is three")
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 8516)
+assert(displayedComboCount() == comboBeforeThreshold + 5, "a qualifying burst must show the full combo count")
+burstTimers[#burstTimers].callback()
+assert(sounds == beforeThreshold + 3, "a burst at the minimum must play the full cascade")
+
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 439440)
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 439440)
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
+assert(sounds == beforeThreshold + 7, "a burst above the minimum must play on combat end")
+
+module:HandleCommand("minhits 2")
+assert(minBurstHitsOption.get() == 2)
+module:HandleCommand("minhits 2.5")
+module:HandleCommand("minhits 0")
+module:HandleCommand("minhits 11")
+assert(minBurstHitsOption.get() == 2, "invalid thresholds must not change the setting")
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 8516)
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_ENABLED")
+assert(sounds == beforeThreshold + 7, "separate bursts must not accumulate")
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 439440)
+burstTimers[#burstTimers].callback()
+assert(sounds == beforeThreshold + 9)
+
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_REGEN_DISABLED")
+now = 20
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_SWING", 2, 0)
+now = 20.05
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_SWING", 2, 0)
+burstTimers[#burstTimers].callback()
+assert(sounds == beforeThreshold + 9, "a single early swing must be silent below the threshold")
+local textBeforeSwingBurst = display.text.value
+now = 22
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_SWING", 2, 0)
+now = 22.05
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_SWING", 2, 0)
+assert(display.text.value == textBeforeSwingBurst, "one early swing must not update text")
+now = 22.1
+eventFrame.scripts.OnEvent(eventFrame, "PLAYER_SWING", 2, 0)
+assert(displayedComboCount() == 2, "a qualifying early-swing burst must show combo text")
+burstTimers[#burstTimers].callback()
+assert(sounds == beforeThreshold + 11, "a qualifying early-swing burst must play")
+
+now = 25
+textEnabledOption.set(false)
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 8516)
+textEnabledOption.set(true)
+assert(not display.shown, "enabling text must not reveal a new below-threshold combo")
+eventFrame.scripts.OnEvent(eventFrame, "SPELL_UPDATE_COOLDOWN", 8516)
+assert(display.shown and displayedComboCount() == 2, "text must appear when the burst reaches the minimum")
 
 print("Extra Attack animation tests passed")

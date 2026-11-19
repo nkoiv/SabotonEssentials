@@ -49,6 +49,7 @@ LOCALIZED_CLASS_NAMES_MALE = setmetatable({}, { __index = function(_, key) retur
 MinimalSliderWithSteppersMixin = { Label = { Right = 1 } }
 SettingsControlMixin = {}
 function CreateFromMixins() return {} end
+function CreateSettingsButtonInitializer() return {} end
 
 local function category() return { GetID = function() return 1 end } end
 Settings = {
@@ -85,7 +86,7 @@ local function session(saved)
     DEFAULT_CHAT_FRAME = { AddMessage = function(_, message) messages[#messages + 1] = message end }
     SabotonEssentialsDB = saved
     local addon = {}
-    for _, file in ipairs({ "src/Core.lua", "src/Modules/SqueakyToy.lua", "src/Modules/ExtraAttack.lua", "src/Modules/GatheringTimer.lua", "src/Modules/MinimapButton.lua", "src/Support/GuildSync.lua", "src/Modules/SpyEnhancement.lua", "src/Options.lua" }) do
+    for _, file in ipairs({ "src/Core.lua", "src/Modules/SqueakyToy.lua", "src/Modules/ExtraAttack.lua", "src/Modules/GatheringTimer.lua", "src/Modules/TankTarget.lua", "src/Modules/MinimapButton.lua", "src/Support/GuildSync.lua", "src/Modules/SpyEnhancement.lua", "src/Options.lua" }) do
         assert(loadfile(file))("SabotonEssentials", addon)
     end
     fire("ADDON_LOADED", "SabotonEssentials")
@@ -108,12 +109,26 @@ slash("gather add Another Herb herb 70 140")
 slash("gather toggle Another Herb")
 slash("gather toggle Copper")
 slash("extraattack window 1.7")
+slash("extraattack minhits 3")
 slash("extraattack textformat Streak %d")
 slash("squeak hostile")
 slash("squeak debug")
+slash("spyenhancement detect player ЇЁ")
 control("EXTRAATTACK", "TEXTARCDURATION").set(1.8)
 control("GATHER", "WIDTH").set(245)
 control("MINIMAP", "SHOWBUTTON").set(false)
+control("TANKTARGET", "THREATLOW").set(85)
+control("TANKTARGET", "THREATHIGH").set(95)
+control("TANKTARGET", "TANKTHREATLOW").set(200)
+control("TANKTARGET", "TANKTHREATHIGH").set(250)
+control("TANKTARGET", "THREATMODE").set("raw")
+assert(control("TANKTARGET", "INFERGROUPTANK").get(), "group tank guessing defaults on")
+slash("tanktarget guess")
+assert(not control("TANKTARGET", "ALLTHREAT").get(), "all-nameplate threat defaults off")
+slash("tanktarget allthreat")
+assert(control("TANKTARGET", "HOSTILEONLY").get(), "hostile-only defaults on")
+control("TANKTARGET", "HOSTILEONLY").set(false)
+slash("tanktarget hostile")
 
 local gather = addon.modules.gather.frame
 gather.x, gather.y = 125, -95
@@ -126,13 +141,19 @@ local saved = SabotonEssentialsDB
 assert(saved.modules.gather.state.minDurationOverride == false)
 assert(saved.modules.gather.state.maxDurationOverride == false)
 assert(saved.modules.spyenhancement.state.syncState.lastSyncTime == 0)
+assert(saved.modules.spyenhancement.state.cyrillicCache["player:ЇЁ"].ukrainian[1] == "Ї")
 assert(saved.modules.gather.state.position.x == 125 and saved.modules.gather.state.position.y == -95)
 assert(math.abs(saved.modules.minimap.state.angle - 90) < 0.001)
 
 addon = session(saved)
 assert(control("SPYENHANCEMENT", "SHAREKOSREASONS").get(), "reason-sharing preference must survive reload")
 assert(addon.modules.spyenhancement:GetPersistentState().syncState.lastSyncTime == 0)
+slash("spyenhancement detect player ЇЁ")
+assert(said("Mixed indicators (Ukrainian-compatible: Ї; Russian-compatible: Ё); inconclusive"),
+    "spelling clues must survive reload")
 assert(control("EXTRAATTACK", "COMBOWINDOW").get() == 1.7)
+assert(control("EXTRAATTACK", "MINBURSTHITS").get() == 3)
+control("EXTRAATTACK", "MINBURSTHITS").set(4)
 assert(control("EXTRAATTACK", "COMBOTEXTFORMAT").get() == "Streak %d")
 assert(control("EXTRAATTACK", "TEXTARCDURATION").get() == 1.8)
 assert(control("SQUEAK", "ANYHOSTILEDEATH").get())
@@ -142,6 +163,14 @@ assert(control("GATHER", "GATHER_2770").get())
 assert(control("GATHER", "GATHER_CUSTOM_19").get())
 assert(not control("GATHER", "GATHER_CUSTOM_20").get())
 assert(not control("MINIMAP", "SHOWBUTTON").get())
+assert(control("TANKTARGET", "THREATLOW").get() == 85)
+assert(control("TANKTARGET", "THREATHIGH").get() == 95)
+assert(control("TANKTARGET", "TANKTHREATLOW").get() == 200)
+assert(control("TANKTARGET", "TANKTHREATHIGH").get() == 250)
+assert(control("TANKTARGET", "THREATMODE").get() == "raw")
+assert(not control("TANKTARGET", "INFERGROUPTANK").get(), "disabled tank guessing survives reload")
+assert(control("TANKTARGET", "ALLTHREAT").get(), "all-nameplate threat survives reload")
+assert(control("TANKTARGET", "HOSTILEONLY").get(), "hostile-only survives reload")
 assert(addon.modules.gather.frame.x == 125 and addon.modules.gather.frame.y == -95)
 assert(math.abs(addon.modules.minimap:GetPersistentState().angle - 90) < 0.001)
 lootName = "Mystic Herb"
@@ -155,6 +184,7 @@ assert(SabotonEssentialsDB.modules.gather.state.minDurationOverride)
 assert(SabotonEssentialsDB.modules.gather.state.maxDurationOverride)
 saved = SabotonEssentialsDB
 addon = session(saved)
+assert(control("EXTRAATTACK", "MINBURSTHITS").get() == 4)
 lootName = "Mystic Herb"
 fire("LOOT_READY")
 slash("gather status")

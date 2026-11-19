@@ -1,5 +1,75 @@
 # Saboton Essentials - Changelog
 
+## [0.5.1] - 2026-11-19
+
+- Avoid the Tank Target secret threat color-curve error on Forever. Display restricted percentages in neutral white using native text formatting; readable percentages retain their threshold colors.
+
+## [0.5.0-beta] - 2026-11-18
+
+- Use native Settings controls for Spy Enhancement like the other modules, with a separate "Manage guild sync..." window that separates routine sync from import cleanup. Group longer settings pages with section headings, keep module order stable, and gray out dependent controls without changing saved preferences or defaults. Retain the legacy fallback dashboard.
+- Show Tank Target threat labels only on living, attackable units. Suppress interactable-object, friendly, dead/ghost, and unidentified plates in both threat modes; keep unknown threat on eligible units as `?`. Use separate native gates for secret eligibility without comparing restricted health or changing shield visibility; report unsupported/rejected checks.
+- Add a saved "Guess a tank when no group tank is assigned" option and `/saboton tanktarget guess` toggle. Disable threat-based, recent-threat and only-tank-capable-class guesses for groups without tanks; manual selection, assigned roles, main-tank assignments and solo pet handling remain independent. Defaults on to preserve existing behavior.
+
+## [0.4.10-beta] - 2026-11-18
+
+- Add `/saboton tanktarget testshields`, a session-only forced-shield diagnostic bypassing tank matching and hostile filtering. Add a saved, off-by-default all-nameplate threat option and `/saboton tanktarget allthreat`; query each mob independently, including tank lead, while respecting the master threat toggle and hostile-only filter.
+
+## [0.4.9-beta] - 2026-11-17
+
+- Read nameplate tokens from `UnitFrame.unit` when `namePlateUnitToken` is absent or unreadable, before trying numbered-plate lookups. This enables non-current tank-target matching on Forever instance plates using that token layout; in-game confirmation is still needed.
+
+## [0.4.8-beta] - 2026-11-17
+
+- Render restricted multi-tank matches as separate shield-and-initial rows using native secret-boolean alpha, instead of omitting other tanks. Keep comma-separated initials for resolved matches. Prefer the canonical current-target comparison when another tank's direct plate lookup is unavailable, including for a sole remote tank. Report rejected native visibility calls and keep threat text independent. Fixed row slots may leave gaps; Forever instance rendering still needs in-game validation.
+
+## [0.4.7-beta] - 2026-11-17
+
+- Do not let unresolved secret nameplate comparisons suppress the readable shared-target fallback for another player's tank-target shield.
+- Track all assigned TANK-role members (including cached roles), or all main-tank assignments when no TANK roles are available. Show one shield per target with matching tanks' dotted initials in stable name order, for example `A.Z., L.J.`. Manual selection still tracks only the chosen tank, and existing single-tank/solo-pet heuristics remain fallback behavior. Keep player threat independent. If multi-tank matching is restricted to secret booleans, show only resolved matches and report the limitation once rather than inventing a list.
+
+## [0.4.6-beta] - 2026-11-17
+
+- Add periods to tank initials beneath the shield, for example `L.J.` or `A.Z.`. A single available initial uses `L.`; unknown names remain `?`.
+
+## [0.4.5-beta] - 2026-11-17
+
+- Use the canonical current-target token for the selected tank's shield when that tank is the player, avoiding reliance on the `playertarget` alias and restricted target comparisons.
+
+## [0.4.4-beta] - 2026-11-17
+
+- Add a saved, on-by-default Tank Target "Hostile targets only" option and `/saboton tanktarget hostile` toggle. Filter the shield, initials, and threat text using the game's enemy check, including shared-target fallback and secret-safe visibility.
+
+## [0.4.3-beta] - 2026-11-17
+
+- Separate tank-target identity from threat: show tank initials beneath a neutral white shield on the tank's target, with a white shared-target pulse. Show `Threat 75%` on your current target even if the tank targets something else, red `AGGRO` for readable confirmed DPS aggro, and `Lead 140%` for tanks holding aggro. Keep shield/initial visibility independent of the threat label, including secret target matches.
+
+## [0.4.2-beta] - 2026-11-17
+
+- Clean up Tank Target's threat formatting, initials naming, and glow animation; enumerate each health-bar container's children once per scan. Report unsupported events and update failures without repeated chat spam (unless debug is on), and hide secret target matches if the client lacks native boolean alpha support.
+- Replace nonfunctional raid-marker halo tinting with the detected tank's first-name and Forever surname initials before the threat percentage (for example `PR: 141%` or `AZ: 110%`). Respect Forever's regional-name mode so realms are not treated as surnames. Restore the original green shared-target halo. Preserve accented initials and show `?:` when the name is unreadable.
+
+## [0.4.1-beta] - 2026-11-16
+
+- Fix raid-marker halo colors when Forever returns a secret marker index before a readable value can be cached. Render secret marker colors directly through native color curves instead of falling back to green.
+- Add a configurable threat percentage above the Tank Target shield on the player's current target. DPS defaults to scaled threat with 50/80% green/yellow/red bands; assigned/manual tanks holding aggro see their lead over the next-highest unit with reversed 120/150% bands. Tanks retain red warning colors after losing aggro; DPS pulling aggro does not switch to reassuring tank colors. Include raw/scaled mode, four saved threshold sliders and slash commands, native secret-safe text/color rendering, and an explicit unknown state rather than cached threat.
+- Color the Tank Target halo using the tank's own raid marker, while keeping the shield's gold/green shared-target tint unchanged. Cache readable markers before combat, retain them during restricted reads, and clear stale colors on readable marker removal or tank identity changes.
+
+## [0.4.0-beta] - 2026-11-16
+
+- Add the **Tank Target** module (`/saboton tanktarget`): marks the nameplate of the group tank's current target with a shield icon — gold normally, green with a breathing glow when it is also your target. Tank detection uses manual pick, TANK role (name-cached for combat), main-tank assignment, threat, the only tank-capable class out of combat, or your pet while solo. Nameplate matching is secret-safe (plate identity first, then GUID, then `UnitIsUnit` routed through `SetAlphaFromBoolean`). Enabled state, solo-pet handling, and mark size are configurable in Options. Tank-target logic credit: the ScryWoW addon, which had this feature first.
+
+## [0.3.5-beta] - 2026-11-16
+
+- Add a configurable minimum extra-attack burst size for sounds and combo text, preserving the default behavior.
+
+## [0.3.4] - 2026-11-15
+
+- Add `/saboton spyenhancement checkcyrillic` for target first-name, Forever surname, and guild spelling clues; report mixed and inconclusive results without claiming nationality.
+
+## [0.3.3-beta] - 2026-11-15
+
+- Fix Seal of Command activation incorrectly triggering the extra-attack sound; only the observed proc spell 20424 is counted.
+
 ## [0.3.2-beta.2] - 2026-11-14
 
 - Add **Allow all** to the Spy Enhancement dashboard to re-enable all suppressed player and guild imports at once; names return only on a later sync.

@@ -22,8 +22,10 @@
   in one action. Allowed names remain absent until the next sync.
 - Still unverified in-game: twenty-client load, restriction transitions,
   disconnect/reconnect recovery, and modern/fallback dashboard layout.
-- The Windfury rank and Seal of Command spell IDs still require in-game proc
-  verification; Seal detection is disabled by default.
+- Windfury rank spell IDs still require in-game proc verification. Seal of
+  Command proc spell 20424 was observed in a cooldown event in-game; detection
+  remains experimental and disabled by default. Whether other Seal ranks use
+  20424 or different proc IDs on Forever remains unverified.
 - User-facing setup, status meanings, and diagnostic steps are in the
   [README sync guide](../README.md#sync-quick-start-and-recovery).
 

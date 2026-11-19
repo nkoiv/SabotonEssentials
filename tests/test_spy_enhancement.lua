@@ -168,18 +168,101 @@ assert(a.db.KOSData["Remote-Target"] and a.guilds["remote guild"])
 assert(a.adds == 2 and a.toggles == 2, "toggle API removed an already watched guild")
 
 h:Select(a)
+do
+local state = a.module:GetPersistentState()
+state.cyrillicCache = { ["player:old"] = { nationality = "russian" } }
+state.cyrillicCacheVersion = nil
+a.module:LoadPersistentState(state)
+assert(next(a.module:GetPersistentState().cyrillicCache) == nil, "old cache must be invalidated")
+assert(a.module:GetPersistentState().syncState.lastConfirmedTime > 0, "cache migration must preserve sync state")
+end
 a.module:HandleCommand("detect player Ёж")
-assert(said(a, "Likely russian"))
+assert(said(a, "Ёж: Russian-compatible indicator(s): Ё"))
 a.module:HandleCommand("detect guild ГільдіяЇ")
-assert(said(a, "Likely ukrainian"))
+assert(said(a, "ГільдіяЇ: Ukrainian-compatible indicator(s): і Ї"))
+assert(said(a, "І also appears in Belarusian"))
 a.module:HandleCommand("detect player Анна")
-assert(said(a, "language is unclear"))
+assert(said(a, "Cyrillic without distinguishing indicators; inconclusive"))
 a.module:HandleCommand("detect player Anna")
 assert(said(a, "No Cyrillic letters"))
+a.module:HandleCommand("detect player ЇЁЁ")
+assert(said(a, "Mixed indicators (Ukrainian-compatible: Ї; Russian-compatible: Ё); inconclusive"))
+a.module:HandleCommand("detect player ԯ")
+assert(said(a, "ԯ: Cyrillic without distinguishing indicators"))
+a.module:HandleCommand("detect player ԰")
+assert(said(a, "԰: No Cyrillic letters"))
+
+do
+local originalUnitName = UnitName
+local originalGuildInfo, originalRegional = GetGuildInfo, RegionalUniqueNamesEnabled
+local targetExists, targetIsPlayer, targetName, targetSurname, targetGuild = true, true, "КозакЇ", "Ёж", "ГільдіяЇ"
+function UnitExists(unit) assert(unit == "target") return targetExists end
+function UnitIsPlayer(unit) assert(unit == "target") return targetIsPlayer end
+function UnitName(unit)
+    if unit == "target" then return targetName, targetSurname end
+    return originalUnitName(unit)
+end
+function GetGuildInfo(unit)
+    if unit == "target" then return targetGuild end
+    return originalGuildInfo(unit)
+end
+local secret = {}
+function issecretvalue(value) return value == secret end
+local function checkTarget(expected)
+    a.messages = {}
+    a.module:HandleCommand("checkcyrillic")
+    assert(said(a, expected), expected .. "; got: " .. table.concat(a.messages, " | "))
+end
+checkTarget("Name КозакЇ: Ukrainian-compatible indicator(s): Ї")
+assert(said(a, "Surname Ёж: Russian-compatible indicator(s): Ё"))
+assert(said(a, "Full name: mixed indicators; inconclusive"))
+assert(said(a, "Guild ГільдіяЇ: Ukrainian-compatible"))
+assert(said(a, "not nationality") and said(a, "Guild clues describe the guild"))
+assert(a.module:GetPersistentState().cyrillicCache["player:КозакЇ"].ukrainian[1] == "Ї")
+targetName = "Ёж"
+checkTarget("Ёж: Russian-compatible indicator(s): Ё")
+targetName = "Анна"
+checkTarget("Cyrillic without distinguishing indicators")
+targetName = "Anna"
+checkTarget("No Cyrillic letters")
+targetName, targetSurname, targetGuild = "Anna", secret, secret
+checkTarget("Surname: unavailable or restricted")
+assert(said(a, "Guild: unavailable or restricted"))
+targetSurname, targetGuild = nil, nil
+checkTarget("Surname: unavailable")
+assert(said(a, "Guild: none or unavailable"))
+targetSurname = "Ёrealm"
+function RegionalUniqueNamesEnabled() return false end
+checkTarget("Name Anna: No Cyrillic letters")
+assert(not said(a, "Surname") and not said(a, "Ёrealm"), "realm must not be analyzed as a surname")
+function RegionalUniqueNamesEnabled() return secret end
+checkTarget("Name Anna: No Cyrillic letters")
+assert(said(a, "Surname: unavailable; name format is restricted"))
+RegionalUniqueNamesEnabled = originalRegional
+targetExists = false
+checkTarget("Select a player target")
+targetExists, targetIsPlayer = true, false
+checkTarget("target is not a player")
+targetIsPlayer, targetName = true, nil
+checkTarget("name is unavailable or restricted")
+targetName = secret
+checkTarget("name is unavailable or restricted")
+targetExists = secret
+checkTarget("Target information is restricted")
+targetExists, targetIsPlayer = true, secret
+checkTarget("Target information is restricted")
+UnitName = originalUnitName
+GetGuildInfo, RegionalUniqueNamesEnabled = originalGuildInfo, originalRegional
+UnitExists, UnitIsPlayer, issecretvalue = nil, nil, nil
+end
+
 a.db.KOSData["КозакЇ"] = time()
 a.db.PlayerData["КозакЇ"] = { guild = "ГільдіяЇ" }
 a.module:HandleCommand("detectkos")
-assert(said(a, "Player КозакЇ: ukrainian") and said(a, "Guild ГільдіяЇ: ukrainian"))
+assert(said(a, "Player КозакЇ: Ukrainian-compatible") and said(a, "Guild ГільдіяЇ: Ukrainian-compatible"))
+a.messages = {}
+a.module:HandleCommand("cyrillicstats")
+assert(said(a, "1 mixed") and said(a, "Ukrainian-compatible"))
 a.module:LoadPersistentState({
     data = {
         kosPersonal = {

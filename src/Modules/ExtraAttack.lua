@@ -51,6 +51,8 @@ local countSealOfCommand = false
 local comboWindow = DEFAULT_COMBO_WINDOW
 local comboCount = 0
 local comboExpireTime = 0
+local displayedComboCount = 0
+local displayExpireTime = 0
 local ticker
 local textEnabled = true
 local comboTextFormat = DEFAULT_COMBO_TEXT_FORMAT
@@ -60,6 +62,7 @@ local textArcDuration = DEFAULT_TEXT_ARC_DURATION
 local textFadeDuration = DEFAULT_TEXT_FADE_DURATION
 local soundEnabled = true
 local soundKey = "kaching"
+local minBurstHits = 1
 local soundStagger = 0.09      -- seconds between the staggered sounds of a multi-hit burst
 local burstSettleTime = 0.15   -- wait this long after the last burst hit before sounding it
 
@@ -89,12 +92,7 @@ local WINDFURY_SPELL_HITS = {
 }
 
 local SEAL_OF_COMMAND_SPELL_HITS = {
-    [20375] = 1,  -- Seal of Command (Rank 1)
     [20424] = 1,  -- Seal of Command proc
-    [20915] = 1,  -- Seal of Command (Rank 2)
-    [20918] = 1,  -- Seal of Command (Rank 3)
-    [20919] = 1,  -- Seal of Command (Rank 4)
-    [20920] = 1,  -- Seal of Command (Rank 5)
 }
 
 local function findSoundOption(key)
@@ -154,18 +152,19 @@ end
 
 local function updateComboDisplay()
     local display = ExtraAttack.comboDisplay
-    if not textEnabled or comboCount <= 0 then
+    if not textEnabled or displayedComboCount <= 0 or comboCount <= 0 then
         display:SetScript("OnUpdate", nil)
         display:Hide()
         return
     end
 
-    display.text:SetText(formatComboText(comboCount))
+    display.text:SetText(formatComboText(displayedComboCount))
     display:Show()
 end
 
 local function resetCombo()
     comboCount = 0
+    displayedComboCount = 0
     updateComboDisplay()
 end
 
@@ -178,6 +177,7 @@ local function ensureTicker()
     ticker = C_Timer.NewTicker(TICKER_INTERVAL, function()
         if GetTime() >= comboExpireTime then
             comboCount = 0
+            displayedComboCount = 0
             ticker:Cancel()
             ticker = nil
         end
@@ -209,7 +209,7 @@ end
 local function animateComboDisplay(display, elapsed)
     display.arcElapsed = display.arcElapsed + elapsed
     local progress = positionComboDisplay(display)
-    local fadeStart = math.max(comboExpireTime, display.startedAt + textArcDuration)
+    local fadeStart = math.max(displayExpireTime, display.startedAt + textArcDuration)
     local fadeProgress = math.max(0, (GetTime() - fadeStart) / textFadeDuration)
     display:SetAlpha(math.max(0, 1 - fadeProgress))
     if progress >= 1 and fadeProgress >= 1 then
@@ -240,23 +240,30 @@ end
 local function flushBurst()
     local hits = burstHits
     resetBurst()
-    playBurstCascade(hits)
+    if hits >= minBurstHits then
+        playBurstCascade(hits)
+    end
     if DEBUG and hits > 0 then
-        addon.Print("Burst settled: " .. hits .. " extra attack hit(s), cascade played.")
+        addon.Print("Burst settled: " .. hits .. " extra attack hit(s), "
+            .. (hits >= minBurstHits and "sound threshold met." or "below sound threshold."))
     end
 end
 
--- One extra-attack hit landed. The combo text updates immediately; the sound waits for the
--- burst to settle so a multi-hit proc plays one cascade instead of overlapping sounds.
+-- The text appears as soon as the burst qualifies; sound waits for the burst to settle.
 local function handleProc()
     if comboCount > 0 and GetTime() >= comboExpireTime then
         comboCount = 0
+        displayedComboCount = 0
     end
     comboCount = comboCount + 1
     comboExpireTime = GetTime() + comboWindow
-    updateComboDisplay()
-    if textEnabled then
-        restartComboAnimation()
+    if burstHits >= minBurstHits then
+        displayedComboCount = comboCount
+        displayExpireTime = comboExpireTime
+        updateComboDisplay()
+        if textEnabled then
+            restartComboAnimation()
+        end
     end
     ensureTicker()
 
@@ -354,6 +361,7 @@ end
 local function printStatus()
     addon.Print("Enabled: " .. (enabled and "yes" or "no"))
     addon.Print("Sound: " .. (soundEnabled and findSoundOption(soundKey).label or "off"))
+    addon.Print("Minimum extra attacks per burst for sound and text: " .. minBurstHits)
     addon.Print("Burst sounds: one ka-ching per hit, staggered " .. soundStagger .. "s and +1 semitone per hit")
     addon.Print("Text: " .. (textEnabled and ("'" .. comboTextFormat .. "'") or "off"))
     addon.Print(string.format("Text offset: horizontal %d, vertical %d", textOffsetX, textOffsetY))
@@ -368,10 +376,12 @@ end
 function ExtraAttack:GetOptionsSchema()
     return {
         name = "Extra Attack",
+        enabledKey = "enabled",
         options = {
             {
                 type = "checkbox",
                 key = "enabled",
+                section = "General",
                 label = "Enable Extra Attack",
                 tooltip = "Master switch for the whole module (sound, combo text, and detection).",
                 default = true,
@@ -388,8 +398,9 @@ function ExtraAttack:GetOptionsSchema()
             {
                 type = "checkbox",
                 key = "countSealOfCommand",
+                section = "General",
                 label = "Count Seal of Command procs",
-                tooltip = "Experimental: count recognized Seal of Command spell updates as extra attacks. Off by default.",
+                tooltip = "Experimental: count Seal of Command proc spell 20424 as an extra attack. Off by default.",
                 default = false,
                 get = function() return countSealOfCommand end,
                 set = function(value) countSealOfCommand = value end,
@@ -397,6 +408,7 @@ function ExtraAttack:GetOptionsSchema()
             {
                 type = "slider",
                 key = "comboWindow",
+                section = "General",
                 label = "Combo streak window (seconds)",
                 tooltip = "How long the combo streak keeps going without a new extra attack before it resets.",
                 min = 0.1,
@@ -410,6 +422,7 @@ function ExtraAttack:GetOptionsSchema()
             {
                 type = "checkbox",
                 key = "textEnabled",
+                section = "Combo text",
                 label = "Show combo text",
                 tooltip = "Show the on-screen combo counter text.",
                 default = true,
@@ -417,14 +430,15 @@ function ExtraAttack:GetOptionsSchema()
                 set = function(value)
                     textEnabled = value
                     updateComboDisplay()
-                    if textEnabled and comboCount > 0 then restartComboAnimation() end
+                    if textEnabled and displayedComboCount > 0 and comboCount > 0 then restartComboAnimation() end
                 end,
             },
             {
                 type = "checkbox",
                 key = "soundEnabled",
+                section = "Sound",
                 label = "Play sound",
-                tooltip = "Play a sound on each extra attack proc.",
+                tooltip = "Play sounds for bursts that meet the minimum extra attack count.",
                 default = true,
                 get = function() return soundEnabled end,
                 set = function(value) soundEnabled = value end,
@@ -432,6 +446,7 @@ function ExtraAttack:GetOptionsSchema()
             {
                 type = "dropdown",
                 key = "soundKey",
+                section = "Sound", dependsOn = "soundEnabled",
                 label = "Sound",
                 tooltip = "Which sound plays when the trigger fires.",
                 default = "kaching",
@@ -447,9 +462,24 @@ function ExtraAttack:GetOptionsSchema()
             },
             {
                 type = "slider",
+                key = "minBurstHits",
+                section = "General",
+                label = "Minimum extra attacks for sound and text",
+                tooltip = "Only show combo text and play sound when at least this many extra attacks land together within the short burst window.",
+                min = 1,
+                max = 10,
+                step = 1,
+                default = 1,
+                format = "%d",
+                get = function() return minBurstHits end,
+                set = function(value) minBurstHits = math.max(1, math.min(10, math.floor(value + 0.5))) end,
+            },
+            {
+                type = "slider",
                 key = "soundStagger",
+                section = "Sound", dependsOn = "soundEnabled",
                 label = "Burst stagger (seconds)",
-                tooltip = "Seconds between the sounds of a multi-hit burst. A single extra attack plays one sound; N hits play N sounds, staggered and rising in pitch.",
+                tooltip = "Seconds between sounds in a qualifying burst. N hits play N sounds, staggered and rising in pitch.",
                 min = 0,
                 max = 0.3,
                 step = 0.01,
@@ -461,6 +491,7 @@ function ExtraAttack:GetOptionsSchema()
             {
                 type = "text",
                 key = "comboTextFormat",
+                section = "Combo text", dependsOn = "textEnabled",
                 label = "Combo text (use %d for the combo count)",
                 tooltip = "The on-screen combo text. %d is replaced with the combo count.",
                 default = DEFAULT_COMBO_TEXT_FORMAT,
@@ -473,6 +504,7 @@ function ExtraAttack:GetOptionsSchema()
             {
                 type = "slider",
                 key = "textOffsetX",
+                section = "Combo text", dependsOn = "textEnabled",
                 label = "Combo text horizontal offset",
                 tooltip = "Move the entire arc left or right from screen center.",
                 min = -600, max = 600, step = 10, default = DEFAULT_TEXT_OFFSET, format = "%d",
@@ -485,6 +517,7 @@ function ExtraAttack:GetOptionsSchema()
             {
                 type = "slider",
                 key = "textOffsetY",
+                section = "Combo text", dependsOn = "textEnabled",
                 label = "Combo text vertical offset",
                 tooltip = "Move the entire arc up or down from screen center.",
                 min = -400, max = 400, step = 10, default = DEFAULT_TEXT_OFFSET, format = "%d",
@@ -497,6 +530,7 @@ function ExtraAttack:GetOptionsSchema()
             {
                 type = "slider",
                 key = "textArcDuration",
+                section = "Combo text", dependsOn = "textEnabled",
                 label = "Combo text movement time",
                 tooltip = "Time in seconds to travel along the arc. Higher values move more slowly.",
                 min = 0.2, max = 3.0, step = 0.1, default = DEFAULT_TEXT_ARC_DURATION, format = "%.1fs",
@@ -506,6 +540,7 @@ function ExtraAttack:GetOptionsSchema()
             {
                 type = "slider",
                 key = "textFadeDuration",
+                section = "Combo text", dependsOn = "textEnabled",
                 label = "Combo text fade time",
                 tooltip = "Time in seconds to fade after the arc and combo window finish.",
                 min = 0.1, max = 3.0, step = 0.1, default = DEFAULT_TEXT_FADE_DURATION, format = "%.1fs",
@@ -576,7 +611,7 @@ function ExtraAttack:HandleCommand(message)
     elseif command == "text" then
         textEnabled = not textEnabled
         updateComboDisplay()
-        if textEnabled and comboCount > 0 then restartComboAnimation() end
+        if textEnabled and displayedComboCount > 0 and comboCount > 0 then restartComboAnimation() end
         addon.Print("Combo text " .. (textEnabled and "enabled" or "disabled") .. ".")
     elseif command == "textformat" then
         if rest == "" then
@@ -609,6 +644,14 @@ function ExtraAttack:HandleCommand(message)
             soundKey = soundOption.key
             addon.Print("Sound set to " .. soundOption.label .. ".")
         end
+    elseif command == "minhits" then
+        local hits = tonumber(rest)
+        if not hits or hits ~= math.floor(hits) or hits < 1 or hits > 10 then
+            addon.Print("Usage: /saboton extraattack minhits <whole number from 1 to 10>")
+        else
+            minBurstHits = hits
+            addon.Print("Minimum extra attacks per burst for sound and text set to " .. minBurstHits .. ".")
+        end
     elseif command == "stagger" then
         local seconds = tonumber(rest)
         if not seconds or seconds < 0 then
@@ -620,7 +663,7 @@ function ExtraAttack:HandleCommand(message)
     elseif command == "status" then
         printStatus()
     else
-        addon.Print("Commands: /saboton extraattack status, test, enable, debug, window <seconds>, text, textformat <format>, xoffset <number>, yoffset <number>, sound, soundkey <key>, stagger <seconds>")
+        addon.Print("Commands: /saboton extraattack status, test, enable, debug, window <seconds>, text, textformat <format>, xoffset <number>, yoffset <number>, sound, soundkey <key>, minhits <1-10>, stagger <seconds>")
     end
 end
 

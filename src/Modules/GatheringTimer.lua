@@ -305,48 +305,55 @@ function GatheringTimer:GetOptionsSchema()
     local soundChoices = {}
     for _, o in ipairs(SOUND_OPTIONS) do soundChoices[#soundChoices + 1] = { value = o.key, label = o.label } end
     local opts = {
-        { type = "checkbox", key = "enabled", label = "Enable Gathering Timer",
+        { type = "checkbox", key = "enabled", label = "Enable Gathering Timer", section = "General",
           tooltip = "Master switch for loot detection and the timer bars.",
           default = false, get = function() return enabled end, set = function(v) enabled = v end },
-        { type = "checkbox", key = "locked", label = "Lock frame position",
+        { type = "checkbox", key = "locked", label = "Lock frame position", section = "Appearance",
           tooltip = "Uncheck to drag the timer bars around with the left mouse button (out of combat).",
           default = true, get = function() return locked end,
           set = function(v)
               locked = v
               if GatheringTimer.frame then GatheringTimer.frame:EnableMouse(not v) end
           end },
-        { type = "checkbox", key = "minTimer", label = "Show 'may be up' timer (min)",
+        { type = "checkbox", key = "minTimer", label = "Show 'may be up' timer (min)", section = "Respawn timers",
           tooltip = "Bar that completes when the node may have respawned.",
           default = true, get = function() return minTimerEnabled end,
           set = function(v) minTimerEnabled = v if active then active.finishToken = nil end layoutFrame() updateBars() end },
         { type = "slider", key = "minDuration", label = "'May be up' duration", min = 0, max = 900, step = 5,
+          section = "Respawn timers", dependsOn = "minTimer",
           tooltip = "Seconds until the node may have respawned. 0 disables this bar.",
           default = DEFAULT_MIN, format = "%ds", get = function() return minDuration end,
           set = function(v) minDuration = v minDurationOverride = true if active then active.minSeconds = v active.finishToken = nil layoutFrame() updateBars() end end },
-        { type = "checkbox", key = "maxTimer", label = "Show 'gone / taken' timer (max)",
+        { type = "checkbox", key = "maxTimer", label = "Show 'gone / taken' timer (max)", section = "Respawn timers",
           tooltip = "Bar that completes when the node is gone or was taken.",
           default = true, get = function() return maxTimerEnabled end,
           set = function(v) maxTimerEnabled = v if active then active.finishToken = nil end layoutFrame() updateBars() end },
         { type = "slider", key = "maxDuration", label = "'Gone / taken' duration", min = 0, max = 900, step = 5,
+          section = "Respawn timers", dependsOn = "maxTimer",
           tooltip = "Seconds until the node is gone or was taken. 0 disables this bar.",
           default = DEFAULT_MAX, format = "%ds", get = function() return maxDuration end,
           set = function(v) maxDuration = v maxDurationOverride = true if active then active.maxSeconds = v active.finishToken = nil layoutFrame() updateBars() end end },
         { type = "slider", key = "width", label = "Bar width", min = 60, max = 500, step = 5,
+          section = "Appearance",
           default = barWidth, format = "%dpx", get = function() return barWidth end,
           set = function(v) barWidth = v layoutFrame() end },
         { type = "slider", key = "height", label = "Bar height", min = 8, max = 60, step = 1,
+          section = "Appearance",
           default = barHeight, format = "%dpx", get = function() return barHeight end,
           set = function(v) barHeight = v layoutFrame() end },
         { type = "dropdown", key = "orientation", label = "Bar orientation",
+          section = "Appearance",
           tooltip = "Horizontal or vertical fill.", default = "HORIZONTAL",
           choices = { { value = "HORIZONTAL", label = "Horizontal" }, { value = "VERTICAL", label = "Vertical" } },
           get = function() return orientation end,
           set = function(v) orientation = v layoutFrame() end },
         { type = "dropdown", key = "minSound", label = "Sound: node may be up",
+          section = "Sounds", dependsOn = "minTimer",
           tooltip = "Played when the min timer completes.", default = "ding",
           choices = soundChoices,
           get = function() return minSoundKey end, set = function(v) minSoundKey = v end },
         { type = "dropdown", key = "maxSound", label = "Sound: node gone / taken",
+          section = "Sounds", dependsOn = "maxTimer",
           tooltip = "Played when the max timer completes.", default = "thud",
           choices = soundChoices,
           get = function() return maxSoundKey end, set = function(v) maxSoundKey = v end },
@@ -355,6 +362,7 @@ function GatheringTimer:GetOptionsSchema()
         opts[#opts + 1] = {
             type = "checkbox",
             key = index <= BUILTIN_COUNT and ("gather_" .. tostring(e.itemID)) or ("gather_custom_" .. index),
+            section = "Nodes to track",
             label = e.name .. " (" .. e.kind .. ")",
             tooltip = string.format("Track %s. Respawn %ds-%ds.", e.name, e.minSeconds or DEFAULT_MIN, e.maxSeconds or DEFAULT_MAX),
             default = e.enabled,
@@ -362,7 +370,7 @@ function GatheringTimer:GetOptionsSchema()
             set = function(v) e.enabled = v end,
         }
     end
-    return { name = "Gathering Timer", options = opts }
+    return { name = "Gathering Timer", enabledKey = "enabled", options = opts }
 end
 
 function GatheringTimer:GetPersistentState()

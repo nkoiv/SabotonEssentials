@@ -1,4 +1,4 @@
-local frames, module, canvas, opened, saves
+local frames, module, opened, saves
 local enabled, notifications, sharing, running, syncs, cancels, suppressed, removals, includedSuspected
 local function noop() end
 UIParent = {}
@@ -32,7 +32,7 @@ function CreateFrame(kind, _, parent)
 end
 
 local function run(modern)
-    frames, module, canvas, opened, saves = {}, nil, nil, nil, 0
+    frames, module, opened, saves = {}, nil, nil, 0
     enabled, notifications, running, syncs, cancels = true, true, false, 0, 0
     sharing = false
     removals = 0
@@ -41,6 +41,7 @@ local function run(modern)
     for index = 1, 6 do suppressed[index] = { key = "P\tName" .. index, label = "Player: Name" .. index } end
     local schema = {
         name = "Spy Enhancement",
+        enabledKey = "networkSyncEnabled",
         options = {
             { type = "checkbox", key = "networkSyncEnabled", label = "Enable guild sync", tooltip = "Send and receive", default = true,
                 get = function() return enabled end, set = function(value) enabled = value end },
@@ -75,14 +76,26 @@ local function run(modern)
             end,
         },
     }
+    local preferences, manage
     if modern then
+        preferences = {}
         local function category() return { GetID = function() return 42 end } end
         Settings = {
             VarType = { Boolean = 1 }, RegisterVerticalLayoutCategory = category,
-            RegisterCanvasLayoutSubcategory = function(_, panel) canvas = panel return category() end,
-            RegisterProxySetting = noop, RegisterAddOnCategory = noop,
+            RegisterVerticalLayoutSubcategory = category,
+            RegisterProxySetting = function(_, _, _, _, _, get, set) return { get = get, set = set } end,
+            CreateCheckbox = function(_, setting)
+                preferences[#preferences + 1] = setting
+                return {}
+            end,
+            RegisterInitializer = noop, RegisterAddOnCategory = noop,
             OpenToCategory = function(id) opened = id end,
         }
+        function CreateSettingsButtonInitializer(_, text, callback)
+            assert(text == "Manage guild sync...")
+            manage = callback
+            return {}
+        end
     else Settings = nil end
     local addon = {
         modules = { spyenhancement = { GetOptionsSchema = function() return schema end } },
@@ -108,8 +121,12 @@ local function run(modern)
     local panel
     if modern then
         assert(opened == 42)
-        panel = canvas
+        assert(not module.spyWindow, "opening preferences must not open the management window")
+        assert(manage and #preferences == 3, "Spy must use native settings plus one management launcher")
+        manage()
+        panel = module.spyWindow.dashboard
         panel:Show()
+        assert(#panel.checkboxes == 0, "management must not duplicate native preferences")
     else
         assert(module.spyWindow:IsShown())
         panel = module.spyWindow.dashboard
@@ -117,8 +134,22 @@ local function run(modern)
     assert(panel.sync.enabled and not panel.cancel.enabled)
     assert(not panel.includeSuspected:GetChecked(), "legacy cleanup must default off")
     assert(panel.includeSuspected.text.text == "Include suspected old imports (2 candidates)")
-    assert(panel.checkboxes[1].control.checked and panel.checkboxes[2].control.checked)
-    assert(not panel.checkboxes[3].control.checked, "reason sharing must default off")
+    local function checked(index)
+        if modern then return preferences[index].get() end
+        return panel.checkboxes[index].control.checked
+    end
+    local function click(index, value)
+        if modern then
+            preferences[index].set(value)
+            panel.scripts.OnUpdate(panel, 1)
+        else
+            local check = panel.checkboxes[index].control
+            check.checked = value
+            check.scripts.OnClick(check)
+        end
+    end
+    assert(checked(1) and checked(2))
+    assert(not checked(3), "reason sharing must default off")
     assert(panel.allowAll.enabled, "bulk allow must be enabled while suppressed names exist")
     assert(panel.rows[1].key == "P\tName1" and panel.rows[4].key == "P\tName4")
     assert(panel.next.enabled and not panel.previous.enabled)
@@ -131,10 +162,12 @@ local function run(modern)
     panel.allowAll.scripts.OnClick()
     assert(#suppressed == 0 and not panel.allowAll.enabled and saves == 3,
         "bulk allow must clear all suppressed names and save once")
-    local check = panel.checkboxes[1].control
-    check.checked = false
-    check.scripts.OnClick(check)
+    click(1, false)
     assert(not enabled and not panel.sync.enabled and saves == 4)
+    if not modern then
+        assert(panel.checkboxes[1].control.enabled and not panel.checkboxes[2].control.enabled
+            and not panel.checkboxes[3].control.enabled, "fallback preferences also respect the sync switch")
+    end
     enabled = true
     panel.scripts.OnUpdate(panel, 1)
     panel.sync.scripts.OnClick()
@@ -143,10 +176,8 @@ local function run(modern)
     assert(cancels == 1 and panel.sync.enabled and not panel.cancel.enabled)
     notifications = false
     panel.scripts.OnUpdate(panel, 1)
-    assert(not panel.checkboxes[2].control.checked, "external setting change must refresh")
-    local share = panel.checkboxes[3].control
-    share.checked = true
-    share.scripts.OnClick(share)
+    assert(not checked(2), "external setting change must refresh")
+    click(3, true)
     assert(sharing and saves == 5, "reason-sharing control must save in modern and fallback UI")
     suppressed = { { key = "G\tUnsafe", label = "Guild: |Hlink|hName|h" } }
     panel:Refresh()

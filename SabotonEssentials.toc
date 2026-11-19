@@ -1,8 +1,8 @@
 ## Interface: 16001
 ## Title: Saboton Essentials
-## Notes: Extra attack sounds, gathering timers, and configurable death sounds.
+## Notes: Extra attack sounds, gathering timers, tank-target nameplate marks, and configurable death sounds.
 ## Author: nikok
-## Version: 0.3.2-beta.2
+## Version: 0.5.1
 ## DefaultState: enabled
 ## IconTexture: Interface\Icons\Spell_Frost_FrostNova
 ## SavedVariables: SabotonEssentialsDB
@@ -12,6 +12,7 @@ src\Core.lua
 src\Modules\SqueakyToy.lua
 src\Modules\ExtraAttack.lua
 src\Modules\GatheringTimer.lua
+src\Modules\TankTarget.lua
 src\Modules\MinimapButton.lua
 src\Support\GuildSync.lua
 src\Modules\SpyEnhancement.lua

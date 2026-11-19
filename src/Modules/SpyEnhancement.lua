@@ -26,6 +26,7 @@ local persistentState = {
 local MAX_SYNC_ENTRIES = 500
 local MAX_NAME_LENGTH = 128
 local MAX_REASON_BYTES = 4096
+local CYRILLIC_CACHE_VERSION = 2
 
 local function otherReasonLabel()
     local locale = LibStub and LibStub("AceLocale-3.0", true)
@@ -103,8 +104,10 @@ local function getPersistentState()
     if type(persistentState.syncState.syncedWith) ~= "table" then
         persistentState.syncState.syncedWith = {}
     end
-    if type(persistentState.cyrillicCache) ~= "table" then
+    if persistentState.cyrillicCacheVersion ~= CYRILLIC_CACHE_VERSION
+        or type(persistentState.cyrillicCache) ~= "table" then
         persistentState.cyrillicCache = {}
+        persistentState.cyrillicCacheVersion = CYRILLIC_CACHE_VERSION
     end
     if type(persistentState.listState) ~= "table" then
         persistentState.listState = { players = {}, guilds = {} }
@@ -527,20 +530,24 @@ local UKRAINIAN_SPECIFIC = {
 }
 
 local function analyzeCyrillic(text)
-    local result = { nationality = nil, cyrillic = 0, russian = 0, ukrainian = 0 }
+    local result = { cyrillic = 0, russian = {}, ukrainian = {} }
+    local seen = {}
     local index = 1
     while index <= #text do
         local first, second = text:byte(index, index + 1)
-        if first and second and first >= 0xD0 and first <= 0xD3
+        if first and second and first >= 0xD0 and first <= 0xD4
             and second >= 0x80 and second <= 0xBF then
             local codepoint = (first - 0xC0) * 64 + second - 0x80
             if isCyrillicCodepoint(codepoint) then
                 result.cyrillic = result.cyrillic + 1
-                if RUSSIAN_SPECIFIC[codepoint] then
-                    result.russian = result.russian + 1
-                end
-                if UKRAINIAN_SPECIFIC[codepoint] then
-                    result.ukrainian = result.ukrainian + 1
+                if not seen[codepoint] then
+                    local letter = text:sub(index, index + 1)
+                    if RUSSIAN_SPECIFIC[codepoint] then
+                        result.russian[#result.russian + 1] = letter
+                    elseif UKRAINIAN_SPECIFIC[codepoint] then
+                        result.ukrainian[#result.ukrainian + 1] = letter
+                    end
+                    seen[codepoint] = true
                 end
             end
             index = index + 2
@@ -549,24 +556,24 @@ local function analyzeCyrillic(text)
         end
     end
 
-    if result.cyrillic > 0 then
-        if result.russian > result.ukrainian then
-            result.nationality = "russian"
-        elseif result.ukrainian > result.russian then
-            result.nationality = "ukrainian"
-        else
-            result.nationality = "unclear"
-        end
-    end
     return result
+end
+
+local function cyrillicCategory(result)
+    if result.cyrillic == 0 then return nil end
+    if #result.russian > 0 and #result.ukrainian > 0 then return "mixed" end
+    if #result.ukrainian > 0 then return "ukrainian" end
+    if #result.russian > 0 then return "russian" end
+    return "unclear"
 end
 
 local function analyzeText(text, kind)
     if type(text) ~= "string" or text == "" then return nil end
-    local key = (kind or "player") .. ":" .. text:lower()
+    local key = (kind or "player") .. ":" .. text
     local cache = getPersistentState().cyrillicCache
     local cached = cache[key]
-    if type(cached) == "table" then return cached end
+    if type(cached) == "table" and type(cached.cyrillic) == "number"
+        and type(cached.russian) == "table" and type(cached.ukrainian) == "table" then return cached end
 
     local result = analyzeCyrillic(text)
     cache[key] = result
@@ -574,11 +581,15 @@ local function analyzeText(text, kind)
 end
 
 local function countCache()
-    local counts = { russian = 0, ukrainian = 0, unclear = 0, total = 0 }
+    local counts = { russian = 0, ukrainian = 0, mixed = 0, unclear = 0, total = 0 }
     for _, result in pairs(getPersistentState().cyrillicCache) do
-        if type(result) == "table" and result.nationality then
-            counts[result.nationality] = (counts[result.nationality] or 0) + 1
-            counts.total = counts.total + 1
+        if type(result) == "table" and type(result.cyrillic) == "number"
+            and type(result.russian) == "table" and type(result.ukrainian) == "table" then
+            local category = cyrillicCategory(result)
+            if category then
+                counts[category] = counts[category] + 1
+                counts.total = counts.total + 1
+            end
         end
     end
     return counts
@@ -617,6 +628,7 @@ function SpyEnhancement:LoadPersistentState(state)
     persistentState = {
         syncState = type(state.syncState) == "table" and state.syncState or { lastSyncTime = 0, syncedWith = {} },
         cyrillicCache = type(state.cyrillicCache) == "table" and state.cyrillicCache or {},
+        cyrillicCacheVersion = state.cyrillicCacheVersion,
         listState = type(state.listState) == "table" and state.listState or nil,
     }
     if type(state.data) == "table" then
@@ -747,8 +759,9 @@ end
 function SpyEnhancement:GetOptionsSchema()
     return {
         name = "Spy Enhancement",
+        enabledKey = "networkSyncEnabled",
         dashboard = {
-            description = "Reconcile Spy lists with v4 guild peers. KoS reason sharing is opt-in; incoming reasons preserve your notes. Guild reasons stay local. Remove imported KoS keeps local entries and suppresses removed names. Restrictions defer sync. Edit lists in Spy.",
+            description = "Sync Spy lists with guild peers. Edit lists in Spy; incoming reasons preserve your notes. Combat and chat restrictions defer sync.",
             view = function(includeSuspected) return self:GetSyncView(includeSuspected) end,
             suppressed = function() return self:GetSuppressedImports() end,
             allow = function(key) return self:AllowSyncImport(key) end,
@@ -761,6 +774,7 @@ function SpyEnhancement:GetOptionsSchema()
             {
                 type = "checkbox",
                 key = "networkSyncEnabled",
+                section = "Guild sync",
                 label = "Enable guild sync",
                 tooltip = "Allows manual sync, replies to guild peers, and additive imports. All peers need v4. Sending and imports wait during combat/chat restrictions. Incoming KoS reasons never replace your notes or a previously received real reason.",
                 default = true,
@@ -775,6 +789,7 @@ function SpyEnhancement:GetOptionsSchema()
             {
                 type = "checkbox",
                 key = "shareKOSReasons",
+                section = "Guild sync",
                 label = "Share KoS reasons",
                 tooltip = "Off by default. Share player KoS preset reasons and custom Other text with guild peers, including for names they already have. Does not share guild reasons. Received text is labeled Guild; existing notes win, except our unchanged names-only placeholder. Changing this cancels pending work so old snapshots cannot leak reasons.",
                 default = false,
@@ -787,6 +802,7 @@ function SpyEnhancement:GetOptionsSchema()
             {
                 type = "checkbox",
                 key = "showSyncNotifications",
+                section = "Guild sync",
                 label = "Show completion notifications",
                 tooltip = "Show routine peer and round completion messages. Errors and explicit command feedback remain visible.",
                 default = true,
@@ -912,21 +928,94 @@ local function printStatus()
     addon.Print("Guild sync: " .. (sync and sync:GetStatus() or "Spy unavailable"))
     addon.Print("KoS reason sharing: " .. (options.shareKOSReasons and "on" or "off")
         .. " (outgoing); incoming reasons fill empty fields or unchanged generated placeholders.")
-    addon.Print(string.format("Cyrillic cache: %d Russian, %d Ukrainian, %d unclear.",
-        counts.russian, counts.ukrainian, counts.unclear))
+    addon.Print(string.format("Cyrillic cache: %d Russian-compatible, %d Ukrainian-compatible, %d mixed, %d unclear.",
+        counts.russian, counts.ukrainian, counts.mixed, counts.unclear))
 end
 
-local function detectAndPrint(kind, text)
+local function describeCyrillic(result)
+    local category = cyrillicCategory(result)
+    if not category then return "No Cyrillic letters detected; inconclusive." end
+    if category == "unclear" then return "Cyrillic without distinguishing indicators; inconclusive." end
+    local ukrainian = table.concat(result.ukrainian, " ")
+    local russian = table.concat(result.russian, " ")
+    if category == "mixed" then
+        return "Mixed indicators (Ukrainian-compatible: " .. ukrainian
+            .. "; Russian-compatible: " .. russian .. "); inconclusive."
+    end
+    if category == "ukrainian" then
+        local note = ""
+        for _, letter in ipairs(result.ukrainian) do
+            if letter == "І" or letter == "і" then
+                note = " І also appears in Belarusian."
+                break
+            end
+        end
+        return "Ukrainian-compatible indicator(s): " .. ukrainian .. "." .. note
+    end
+    return "Russian-compatible indicator(s): " .. russian .. "."
+end
+
+local function detectAndPrint(kind, text, label)
     local result = analyzeText(text, kind)
     if not result then
         addon.Print("Usage: /saboton spyenhancement detect [player|guild] <name>")
-    elseif not result.nationality then
-        addon.Print(string.format("%s: No Cyrillic letters detected.", text))
-    elseif result.nationality == "unclear" then
-        addon.Print(string.format("%s: Cyrillic detected, but the language is unclear.", text))
     else
-        addon.Print(string.format("%s: Likely %s based on language-specific Cyrillic letters.", text, result.nationality))
+        addon.Print(string.format("%s%s: %s", label and (label .. " ") or "", text, describeCyrillic(result)))
     end
+    return result
+end
+
+local function detectTarget()
+    local exists = UnitExists("target")
+    if issecretvalue and issecretvalue(exists) then
+        addon.Print("SpyEnhancement: Target information is restricted; try again when it is available.")
+        return
+    end
+    if not exists then
+        addon.Print("SpyEnhancement: Select a player target first.")
+        return
+    end
+    local isPlayer = UnitIsPlayer("target")
+    if issecretvalue and issecretvalue(isPlayer) then
+        addon.Print("SpyEnhancement: Target information is restricted; try again when it is available.")
+        return
+    end
+    if not isPlayer then
+        addon.Print("SpyEnhancement: The target is not a player.")
+        return
+    end
+    local name, surname = UnitName("target")
+    if (issecretvalue and issecretvalue(name)) or type(name) ~= "string" or name == ""
+        or (UNKNOWNOBJECT and name == UNKNOWNOBJECT) then
+        addon.Print("SpyEnhancement: The target player's name is unavailable or restricted.")
+        return
+    end
+    local nameResult = detectAndPrint("player", name, "Name")
+    local regional = RegionalUniqueNamesEnabled and RegionalUniqueNamesEnabled()
+    if not (issecretvalue and issecretvalue(regional)) and regional then
+        if issecretvalue and issecretvalue(surname) then
+            addon.Print("Surname: unavailable or restricted.")
+        elseif type(surname) == "string" and surname ~= "" and (not UNKNOWNOBJECT or surname ~= UNKNOWNOBJECT) then
+            local surnameResult = detectAndPrint("player", surname, "Surname")
+            if (#nameResult.ukrainian > 0 or #surnameResult.ukrainian > 0)
+                and (#nameResult.russian > 0 or #surnameResult.russian > 0) then
+                addon.Print("Full name: mixed indicators; inconclusive.")
+            end
+        else
+            addon.Print("Surname: unavailable.")
+        end
+    elseif issecretvalue and issecretvalue(regional) then
+        addon.Print("Surname: unavailable; name format is restricted.")
+    end
+    local guild = GetGuildInfo and GetGuildInfo("target")
+    if issecretvalue and issecretvalue(guild) then
+        addon.Print("Guild: unavailable or restricted.")
+    elseif type(guild) == "string" and guild ~= "" then
+        detectAndPrint("guild", guild, "Guild")
+    else
+        addon.Print("Guild: none or unavailable.")
+    end
+    addon.Print("Spelling clues only, not nationality; other languages can use these letters. Guild clues describe the guild, not the player.")
 end
 
 local function detectSpyLists(onlyGuilds)
@@ -939,17 +1028,17 @@ local function detectSpyLists(onlyGuilds)
         end
         for name in pairs(playerList) do
             local result = analyzeText(name, "player")
-            if result and result.nationality then
+            if result and result.cyrillic > 0 then
                 found = found + 1
-                addon.Print(string.format("Player %s: %s", name, result.nationality))
+                addon.Print(string.format("Player %s: %s", name, describeCyrillic(result)))
             end
             local playerData = type(SpyPerCharDB.PlayerData) == "table" and SpyPerCharDB.PlayerData[name]
             local guildName = type(playerData) == "table" and playerData.guild
             if validName(guildName) then
                 result = analyzeText(guildName, "guild")
-                if result and result.nationality then
+                if result and result.cyrillic > 0 then
                     found = found + 1
-                    addon.Print(string.format("Guild %s: %s", guildName, result.nationality))
+                    addon.Print(string.format("Guild %s: %s", guildName, describeCyrillic(result)))
                 end
             end
         end
@@ -961,9 +1050,9 @@ local function detectSpyLists(onlyGuilds)
             local name = type(entry) == "table" and entry.name or key
             if validName(name) then
                 local result = analyzeText(name, "guild")
-                if result and result.nationality then
+                if result and result.cyrillic > 0 then
                     found = found + 1
-                    addon.Print(string.format("Guild %s: %s", name, result.nationality))
+                    addon.Print(string.format("Guild %s: %s", name, describeCyrillic(result)))
                 end
             end
         end
@@ -977,7 +1066,7 @@ function SpyEnhancement:HandleCommand(message)
     command = string.lower(command or "")
 
     if command == "" or command == "help" then
-        addon.Print("SpyEnhancement: options | sync | cancel | removeimports | status | debug | allowsync [player|guild] <name> | detect [player|guild] <name> | detectkos | detectguilds | cyrillicstats | clearcyrillicache")
+        addon.Print("SpyEnhancement: options | sync | cancel | removeimports | status | debug | allowsync [player|guild] <name> | detect [player|guild] <name> | checkcyrillic | detectkos | detectguilds | cyrillicstats | clearcyrillicache")
     elseif command == "options" then
         if addon.modules and addon.modules.options then addon.modules.options:HandleCommand("spyenhancement")
         else addon.Print("SpyEnhancement: Options are unavailable.") end
@@ -1010,14 +1099,16 @@ function SpyEnhancement:HandleCommand(message)
             kind, text = "player", rest
         end
         detectAndPrint(kind, trim(text or ""))
+    elseif command == "checkcyrillic" then
+        detectTarget()
     elseif command == "detectkos" then
         detectSpyLists(false)
     elseif command == "detectguilds" then
         detectSpyLists(true)
     elseif command == "cyrillicstats" then
         local counts = countCache()
-        addon.Print(string.format("Cyrillic cache: %d Russian, %d Ukrainian, %d unclear, %d total.",
-            counts.russian, counts.ukrainian, counts.unclear, counts.total))
+        addon.Print(string.format("Cyrillic cache: %d Russian-compatible, %d Ukrainian-compatible, %d mixed, %d unclear, %d total.",
+            counts.russian, counts.ukrainian, counts.mixed, counts.unclear, counts.total))
     elseif command == "clearcyrillicache" then
         getPersistentState().cyrillicCache = {}
         addon.Print("SpyEnhancement: Cyrillic cache cleared.")
