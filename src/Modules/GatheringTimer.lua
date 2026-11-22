@@ -20,38 +20,32 @@ local barWidth = 220
 local barHeight = 18
 local orientation = "HORIZONTAL" -- or "VERTICAL"
 
-local SOUND_OPTIONS = {
-    { key = "none", label = "No sound", silent = true },
-    { key = "ding", label = "Bell chime (may be up)", path = "Interface\\AddOns\\SabotonEssentials\\Media\\clear-bell-chime.mp3" },
-    { key = "thud", label = "Impact thud (gone / taken)", path = "Interface\\AddOns\\SabotonEssentials\\Media\\impact-thud.mp3" },
-    { key = "kaching", label = "Ka-ching!", path = "Interface\\AddOns\\SabotonEssentials\\Media\\kaching.mp3" },
-    { key = "squeak", label = "Squeaky Toy", path = "Interface\\AddOns\\SabotonEssentials\\Media\\squeak.mp3" },
-}
+local SOUND_OPTIONS = addon.TimerBars.SOUNDS
 
 local DEFAULT_MIN = 300
 local DEFAULT_MAX = 540
 
 local GATHERABLES = {
-    { itemID = 2770,  name = "Copper Ore",          kind = "ore",  enabled = false },
-    { itemID = 2771,  name = "Tin Ore",             kind = "ore",  enabled = false },
     { itemID = 2772,  name = "Iron Ore",            kind = "ore",  enabled = false },
     { itemID = 3858,  name = "Mithril Ore",         kind = "ore",  enabled = false },
     { itemID = 7911,  name = "Truesilver Ore",      kind = "ore",  enabled = true },
     { itemID = 10620, name = "Thorium Ore",         kind = "ore",  enabled = true },
-    { itemID = 12363, name = "Arcane Crystal",      kind = "ore",  enabled = true },
+    { itemID = 248815, name = "Heavy Thorium Ore",  kind = "ore",  enabled = true },
     { itemID = 11370, name = "Dark Iron Ore",       kind = "ore",  enabled = false },
-    { itemID = 2447,  name = "Peacebloom",          kind = "herb", enabled = false },
-    { itemID = 765,   name = "Silverleaf",          kind = "herb", enabled = false },
-    { itemID = 2449,  name = "Earthroot",           kind = "herb", enabled = false },
-    { itemID = 785,   name = "Mageroyal",           kind = "herb", enabled = false },
-    { itemID = 2450,  name = "Briarthorn",          kind = "herb", enabled = false },
-    { itemID = 3355,  name = "Wild Steelbloom",     kind = "herb", enabled = false },
-    { itemID = 3821,  name = "Goldthorn",           kind = "herb", enabled = false },
-    { itemID = 8838,  name = "Sungrass",            kind = "herb", enabled = false },
     { itemID = 13465, name = "Mountain Silversage", kind = "herb", enabled = false },
     { itemID = 13468, name = "Black Lotus",         kind = "herb", enabled = true },
 }
 local BUILTIN_COUNT = #GATHERABLES
+
+local RARE_ITEMS = {
+    { itemID = 12363, name = "Arcane Crystal" },
+    { itemID = 248819, name = "Fel Crystal" },
+    { itemID = 13468, name = "Black Lotus" },
+}
+local celebrationSettings = {}
+local lootSession
+local celebrationFrame
+local reportedCelebrationError = {}
 
 local minSoundKey = "ding"
 local maxSoundKey = "thud"
@@ -93,68 +87,124 @@ local function findEntry(itemID, itemName)
     end
     return nil
 end
-local function makeBar(parent, label)
-    local holder = CreateFrame("Frame", nil, parent)
-    holder:SetSize(barWidth, barHeight)
 
-    -- Keep the StatusBar on a lower frame level than the text/flash and draw its fill on the
-    -- BACKGROUND layer, so the label stays readable over the filled portion of the bar.
-    local bar = CreateFrame("StatusBar", nil, holder)
-    bar:SetAllPoints()
-    bar:SetFrameLevel(math.max(holder:GetFrameLevel() - 1, 0))
-    bar:SetMinMaxValues(0, 1)
-    bar:SetValue(0)
-    bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-    bar:GetStatusBarTexture():SetDrawLayer("BACKGROUND")
-    bar:SetOrientation(orientation)
-    holder.bar = bar
-
-    -- Light outline marking the bar's total length, so the unfilled remainder is still visible.
-    for _, point in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
-        local edge = holder:CreateTexture(nil, "BORDER")
-        edge:SetColorTexture(0, 0, 0, 0.8)
-        if point == "TOP" then
-            edge:SetPoint("BOTTOMLEFT", holder, "TOPLEFT", -1, 0)
-            edge:SetPoint("BOTTOMRIGHT", holder, "TOPRIGHT", 1, 0)
-            edge:SetHeight(1)
-        elseif point == "BOTTOM" then
-            edge:SetPoint("TOPLEFT", holder, "BOTTOMLEFT", -1, 0)
-            edge:SetPoint("TOPRIGHT", holder, "BOTTOMRIGHT", 1, 0)
-            edge:SetHeight(1)
-        elseif point == "LEFT" then
-            edge:SetPoint("TOPRIGHT", holder, "TOPLEFT", 0, 1)
-            edge:SetPoint("BOTTOMRIGHT", holder, "BOTTOMLEFT", 0, -1)
-            edge:SetWidth(1)
-        else
-            edge:SetPoint("TOPLEFT", holder, "TOPRIGHT", 0, 1)
-            edge:SetPoint("BOTTOMLEFT", holder, "BOTTOMRIGHT", 0, -1)
-            edge:SetWidth(1)
+local function celebrationEntries()
+    local entries, seen = {}, {}
+    for _, entry in ipairs(RARE_ITEMS) do
+        entries[#entries + 1] = { key = tostring(entry.itemID), itemID = entry.itemID, name = entry.name, default = true }
+        seen[entry.itemID] = true
+    end
+    for index, entry in ipairs(GATHERABLES) do
+        if not entry.itemID or not seen[entry.itemID] then
+            entries[#entries + 1] = {
+                key = entry.itemID and tostring(entry.itemID) or ("custom_" .. index),
+                itemID = entry.itemID, name = entry.name, default = false,
+            }
+            if entry.itemID then seen[entry.itemID] = true end
         end
     end
-
-    -- Brief white flash overlaid when the timer completes, then the whole bar hides.
-    local flash = holder:CreateTexture(nil, "OVERLAY")
-    flash:SetAllPoints()
-    flash:SetColorTexture(1, 1, 1, 0.6)
-    flash:Hide()
-    holder.flash = flash
-
-    local text = holder:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    text:SetPoint("CENTER")
-    holder.text = text
-
-    local title = parent:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    title:SetText(label)
-    holder.title = title
-    return holder
+    return entries
 end
 
-local FLASH_SECONDS = 1.5
-local function flashBar(holder)
-    holder.flash:Show()
-    holder.flash:SetAlpha(0.9)
-    UIFrameFadeOut(holder.flash, FLASH_SECONDS, 0.9, 0)
+local function celebrationSetting(entry)
+    if not celebrationSettings[entry.key] then
+        celebrationSettings[entry.key] = { enabled = entry.default, sound = "kaching" }
+    end
+    return celebrationSettings[entry.key]
 end
+
+local function celebrationError(message)
+    if not reportedCelebrationError[message] then
+        addon.Print("Gathering celebration: " .. message)
+        reportedCelebrationError[message] = true
+    end
+end
+
+local function celebrate(entry)
+    if not celebrationFrame then
+        local frame = CreateFrame("Frame", nil, UIParent)
+        frame:SetAllPoints(UIParent)
+        frame:SetFrameStrata("HIGH")
+        frame:EnableMouse(false)
+        frame.particles = {}
+        for index = 1, 16 do
+            local particle = frame:CreateTexture(nil, "OVERLAY")
+            particle:SetTexture("Interface\\CastingBar\\UI-CastingBar-Spark")
+            particle:SetBlendMode("ADD")
+            particle:SetSize(index % 3 == 0 and 30 or 20, index % 3 == 0 and 30 or 20)
+            particle:SetVertexColor(1, 0.65 + (index % 3) * 0.15, 0.25 + (index % 2) * 0.5)
+            frame.particles[index] = particle
+        end
+        frame:SetScript("OnUpdate", function(self, elapsed)
+            self.elapsed = self.elapsed + elapsed
+            local progress = math.min(self.elapsed / 1.8, 1)
+            for index, particle in ipairs(self.particles) do
+                local angle = (index - 1) * math.pi * 2 / #self.particles
+                local distance = 55 + progress * (140 + (index % 4) * 25)
+                particle:ClearAllPoints()
+                particle:SetPoint("CENTER", self, "CENTER",
+                    math.cos(angle) * distance, math.sin(angle) * distance - 70 * progress * progress)
+                particle:SetAlpha((1 - progress) * (0.65 + 0.35 * math.abs(math.sin(self.elapsed * 8 + index))))
+            end
+            if progress >= 1 then self:Hide() end
+        end)
+        celebrationFrame = frame
+    end
+    celebrationFrame.elapsed = 0
+    celebrationFrame:Show()
+    playSound(celebrationSetting(entry).sound)
+end
+
+local function findCelebration(itemID, itemName)
+    for _, entry in ipairs(celebrationEntries()) do
+        if itemID and entry.itemID == itemID then return entry end
+        if not entry.itemID and itemName and entry.name:lower() == itemName:lower() then return entry end
+    end
+end
+
+-- Match the client's localized self-loot formats, including positional format arguments.
+local function matchesLootFormat(message, format)
+    if type(format) ~= "string" then return false end
+    local pattern, index = "^", 1
+    while index <= #format do
+        local rest = format:sub(index)
+        local placeholder = rest:match("^%%(%d+%$[sd])") or rest:match("^%%([sd])")
+        if placeholder then
+            pattern = pattern .. (placeholder:sub(-1) == "d" and "%d+" or ".+")
+            index = index + #placeholder + 1
+        elseif rest:sub(1, 2) == "%%" then
+            pattern = pattern .. "%%"
+            index = index + 2
+        else
+            pattern = pattern .. format:sub(index, index):gsub("([%^%$%(%)%%%.%[%]%*%+%-%?])", "%%%1")
+            index = index + 1
+        end
+    end
+    return message:match(pattern .. "$") ~= nil
+end
+
+local function onCelebrationLoot(message)
+    if not enabled or not lootSession or type(message) ~= "string" or secret(message) then return end
+    if not lootSession.open and GetTime() > lootSession.expires then lootSession = nil return end
+    local mine = matchesLootFormat(message, LOOT_ITEM_SELF) or matchesLootFormat(message, LOOT_ITEM_SELF_MULTIPLE)
+        or matchesLootFormat(message, LOOT_ITEM_PUSHED_SELF) or matchesLootFormat(message, LOOT_ITEM_PUSHED_SELF_MULTIPLE)
+    if not mine then
+        if type(LOOT_ITEM_SELF) ~= "string" and type(LOOT_ITEM_SELF_MULTIPLE) ~= "string"
+            and type(LOOT_ITEM_PUSHED_SELF) ~= "string" and type(LOOT_ITEM_PUSHED_SELF_MULTIPLE) ~= "string" then
+            celebrationError("Self-loot message formats are unavailable; celebrations cannot confirm received items.")
+        end
+        return
+    end
+    local itemID = tonumber(message:match("|Hitem:(%d+)"))
+    if not itemID then return end
+    local pending = lootSession.items[itemID]
+    if pending and not pending.received then
+        pending.received = true
+        if celebrationSetting(pending.entry).enabled then celebrate(pending.entry) end
+    end
+end
+local TimerBars = addon.TimerBars
+local FLASH_SECONDS = TimerBars.FLASH_SECONDS
 
 local function layoutFrame()
     local f = GatheringTimer.frame
@@ -163,6 +213,12 @@ local function layoutFrame()
     -- A bar shows only while its timer is enabled and has not completed.
     local minShown = minTimerEnabled and active ~= nil and active.minSeconds > 0 and (not active.minFired or GetTime() < active.minFlashUntil)
     local maxShown = maxTimerEnabled and active ~= nil and active.maxSeconds > 0 and (not active.maxFired or GetTime() < active.maxFlashUntil)
+    local preview = not locked and not minShown and not maxShown
+    if preview then
+        minShown = true
+        f.minBar.flash:Hide()
+        TimerBars.Update(f.minBar, "Gathering timer (drag to move)", 1, 0)
+    end
     local n = (minShown and 1 or 0) + (maxShown and 1 or 0)
     local w = vertical and barHeight or barWidth
     local h = vertical and barWidth or barHeight
@@ -195,24 +251,29 @@ local function updateBars()
     local f = GatheringTimer.frame
     if not f then return end
     if not active then
-        f.minBar:SetShown(false)
-        f.maxBar:SetShown(false)
-        f.minBar.title:SetShown(false)
-        f.maxBar.title:SetShown(false)
-        f:SetShown(false)
+        layoutFrame()
         return
     end
+
     local elapsed = GetTime() - active.startedAt
     local function update(holder, duration, fired)
         if fired then return end -- completed bars are hidden by layoutFrame
-        local frac = duration > 0 and math.min(elapsed / duration, 1) or 1
-        holder.bar:SetValue(frac)
-        holder.bar:SetStatusBarColor(0.2, 0.6, 1)
-        local remaining = math.ceil(math.max(duration - elapsed, 0))
-        holder.text:SetText(active.entryName .. " " .. string.format("%d:%02d", math.floor(remaining / 60), remaining % 60))
+        TimerBars.Update(holder, active.entryName, duration, elapsed)
     end
-    update(f.minBar, active.minSeconds, active.minFired)
-    update(f.maxBar, active.maxSeconds, active.maxFired)
+    if minTimerEnabled and active.minSeconds > 0 then update(f.minBar, active.minSeconds, active.minFired) end
+    if maxTimerEnabled and active.maxSeconds > 0 then update(f.maxBar, active.maxSeconds, active.maxFired) end
+end
+
+function GatheringTimer:IsLocked()
+    return locked
+end
+
+function GatheringTimer:SetLocked(value)
+    locked = value
+    if self.frame then
+        self.frame:EnableMouse(not value)
+        layoutFrame()
+    end
 end
 
 local function stopTimers()
@@ -251,14 +312,14 @@ local function onTick()
         active.minFired = true
         active.minFlashUntil = GetTime() + FLASH_SECONDS
         playSound(minSoundKey)
-        if f then flashBar(f.minBar) end
+        if f then TimerBars.Flash(f.minBar) end
         if DEBUG then addon.Print(active.entryName .. " min reached - node may be up.") end
     end
     if maxTimerEnabled and active.maxSeconds > 0 and not active.maxFired and elapsed >= active.maxSeconds then
         active.maxFired = true
         active.maxFlashUntil = GetTime() + FLASH_SECONDS
         playSound(maxSoundKey)
-        if f then flashBar(f.maxBar) end
+        if f then TimerBars.Flash(f.maxBar) end
         if DEBUG then addon.Print(active.entryName .. " max reached - node gone or taken.") end
     end
     -- Once every enabled timer has completed, the run is over: flash fades, then clear.
@@ -288,17 +349,31 @@ local function captureLoot()
     if sourceGUID and not sourceGUID:match("^GameObject") then return end
     -- No loot-window dedup on purpose: re-looting the same node must restart the timer. Duplicate
     -- LOOT_READY / LOOT_OPENED fires for a single pick just reset it twice at the same instant.
+    local timerEntry
     for slot = 1, n do
         local link = GetLootSlotLink and GetLootSlotLink(slot)
         local itemID = link and not secret(link) and tonumber(link:match("item:(%d+)")) or nil
         local name = GetLootSlotInfo and (select(2, GetLootSlotInfo(slot))) or nil
         if secret(name) then name = nil end
-        local entry = findEntry(itemID, name)
-        if entry and entry.enabled then
-            if DEBUG then addon.Print(string.format("Looted tracked %s: %s (id %s)", entry.kind, entry.name, tostring(itemID))) end
-            startTimers(entry)
-            return
+        local celebration = findCelebration(itemID, name)
+        if celebration and celebrationSetting(celebration).enabled and itemID then
+            local slotSource = sourceGUID
+            if slot ~= 1 and GetLootSourceInfo then
+                local ok, guid = pcall(GetLootSourceInfo, slot)
+                slotSource = ok and not secret(guid) and guid or nil
+            end
+            if slotSource and slotSource:match("^GameObject") then
+                if not lootSession.items[itemID] then lootSession.items[itemID] = { entry = celebration } end
+            else
+                celebrationError("Loot source is unavailable; cannot confirm this item came from a gathering node.")
+            end
         end
+        local entry = findEntry(itemID, name)
+        if not timerEntry and entry and entry.enabled then timerEntry = entry end
+    end
+    if timerEntry then
+        if DEBUG then addon.Print(string.format("Looted tracked %s: %s", timerEntry.kind, timerEntry.name)) end
+        startTimers(timerEntry)
     end
 end
 function GatheringTimer:GetOptionsSchema()
@@ -311,10 +386,7 @@ function GatheringTimer:GetOptionsSchema()
         { type = "checkbox", key = "locked", label = "Lock frame position", section = "Appearance",
           tooltip = "Uncheck to drag the timer bars around with the left mouse button (out of combat).",
           default = true, get = function() return locked end,
-          set = function(v)
-              locked = v
-              if GatheringTimer.frame then GatheringTimer.frame:EnableMouse(not v) end
-          end },
+          set = function(v) GatheringTimer:SetLocked(v) end },
         { type = "checkbox", key = "minTimer", label = "Show 'may be up' timer (min)", section = "Respawn timers",
           tooltip = "Bar that completes when the node may have respawned.",
           default = true, get = function() return minTimerEnabled end,
@@ -368,6 +440,28 @@ function GatheringTimer:GetOptionsSchema()
             default = e.enabled,
             get = function() return e.enabled end,
             set = function(v) e.enabled = v end,
+        }
+    end
+    for _, entry in ipairs(celebrationEntries()) do
+        local setting = celebrationSetting(entry)
+        local enabledKey = "celebrate_" .. entry.key
+        opts[#opts + 1] = {
+            type = "checkbox", key = enabledKey, section = "Gathering celebrations",
+            label = "Celebrate " .. entry.name, default = entry.default,
+            tooltip = "Show sparkles and play the selected sound when you receive this item from a gathering node.",
+            get = function() return setting.enabled end,
+            set = function(value) setting.enabled = value end,
+        }
+        opts[#opts + 1] = {
+            type = "dropdown", key = "celebration_sound_" .. entry.key, section = "Gathering celebrations",
+            label = entry.name .. " celebration sound", default = "kaching", dependsOn = enabledKey,
+            choices = soundChoices,
+            get = function() return setting.sound end,
+            set = function(value)
+                local sound = findSoundOption(value)
+                if sound.key == value then setting.sound = value
+                else addon.Print("Unknown celebration sound: " .. tostring(value)) end
+            end,
         }
     end
     return { name = "Gathering Timer", enabledKey = "enabled", options = opts }
@@ -447,12 +541,10 @@ function GatheringTimer:HandleCommand(message)
         DEBUG = not DEBUG
         addon.Print("Debug " .. (DEBUG and "enabled" or "disabled") .. ".")
     elseif command == "lock" then
-        locked = true
-        self.frame:EnableMouse(false)
+        self:SetLocked(true)
         addon.Print("Frame locked.")
     elseif command == "unlock" then
-        locked = false
-        self.frame:EnableMouse(true)
+        self:SetLocked(false)
         addon.Print("Frame unlocked - drag with left button (out of combat).")
     elseif command == "width" or command == "height" then
         local v = tonumber(rest)
@@ -482,10 +574,38 @@ function GatheringTimer:HandleCommand(message)
         local key = string.lower(rest)
         local o = findSoundOption(key)
         if not o or o.key ~= key then
-            addon.Print("Usage: /saboton gather " .. command .. " <none|ding|thud|kaching|squeak>")
+            addon.Print("Usage: /saboton gather " .. command .. " <none|ding|thud|kaching|squeak|huagh>")
         else
             if command == "minsound" then minSoundKey = key else maxSoundKey = key end
             addon.Print(command .. " set to " .. o.label .. ".")
+        end
+    elseif command == "celebrate" or command == "celebrationsound" or command == "testcelebration" then
+        local name, soundKey = rest, nil
+        if command == "celebrationsound" then name, soundKey = rest:match("^(.-)%s+(%S+)%s*$") end
+        local found
+        if name then
+            local needle = name:lower():match("^%s*(.-)%s*$")
+            for _, entry in ipairs(celebrationEntries()) do
+                if entry.key == needle or entry.name:lower() == needle then found = entry break end
+            end
+        end
+        if not found then
+            addon.Print("Usage: /saboton gather " .. command .. " <exact item name|id>"
+                .. (command == "celebrationsound" and " <none|ding|thud|kaching|squeak|huagh>" or ""))
+        elseif command == "testcelebration" then
+            celebrate(found)
+        elseif command == "celebrate" then
+            local setting = celebrationSetting(found)
+            setting.enabled = not setting.enabled
+            addon.Print(found.name .. " celebration " .. (setting.enabled and "enabled" or "disabled") .. ".")
+        else
+            local sound = findSoundOption(soundKey:lower())
+            if sound.key ~= soundKey:lower() then
+                addon.Print("Unknown celebration sound: " .. soundKey)
+            else
+                celebrationSetting(found).sound = sound.key
+                addon.Print(found.name .. " celebration sound: " .. sound.label .. ".")
+            end
         end
     elseif command == "toggle" then
         local arg = rest:lower()
@@ -518,39 +638,35 @@ function GatheringTimer:HandleCommand(message)
     elseif command == "status" then
         printStatus()
     else
-        addon.Print("Commands: /saboton gather status, test, clear, enable, debug, lock, unlock, width <px>, height <px>, orient <h|v>, min <s>, max <s>, minsound <key>, maxsound <key>, toggle <name|id>, add <id|name> <ore|herb> <min> <max>, list")
+        addon.Print("Commands: /saboton gather status, test, clear, enable, debug, lock, unlock, width <px>, height <px>, orient <h|v>, min <s>, max <s>, minsound <key>, maxsound <key>, toggle <name|id>, add <id|name> <ore|herb> <min> <max>, list, celebrate <name|id>, celebrationsound <name|id> <key>, testcelebration <name|id>")
     end
 end
 
 function GatheringTimer:OnEnable()
     local f = CreateFrame("Frame", "SabotonGatherTimerFrame", UIParent)
     f:SetPoint("CENTER", UIParent, "CENTER", 0, -180)
-    f:SetMovable(true)
-    f:SetClampedToScreen(true)
-    f:EnableMouse(false)
-    f:RegisterForDrag("LeftButton")
-    f:SetScript("OnDragStart", function(self)
-        if not locked and not (InCombatLockdown and InCombatLockdown()) then self:StartMoving() end
-    end)
-    f:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local x, y = self:GetCenter()
-        local parentX, parentY = UIParent:GetCenter()
-        if x and y and parentX and parentY then savedPosition = { x = x - parentX, y = y - parentY } end
-        if addon.SaveSettings then addon.SaveSettings() end
-    end)
+    TimerBars.MakeMovable(f, function() return locked end, function(x, y) savedPosition = { x = x, y = y } end)
     f:Hide()
     self.frame = f
 
-    f.minBar = makeBar(f, "Node may be up")
-    f.maxBar = makeBar(f, "Node gone / taken")
+    f.minBar = TimerBars.Create(f, "Node may be up", barWidth, barHeight, orientation)
+    f.maxBar = TimerBars.Create(f, "Node gone / taken", barWidth, barHeight, orientation)
     layoutFrame()
 
     local events = CreateFrame("Frame")
     events:RegisterEvent("LOOT_READY")
     pcall(events.RegisterEvent, events, "LOOT_OPENED")
-    events:SetScript("OnEvent", function()
-        if enabled then captureLoot() end
+    events:RegisterEvent("LOOT_CLOSED")
+    events:RegisterEvent("CHAT_MSG_LOOT")
+    events:SetScript("OnEvent", function(_, event, message)
+        if event == "LOOT_CLOSED" then
+            if lootSession then lootSession.open, lootSession.expires = false, GetTime() + 2 end
+        elseif event == "CHAT_MSG_LOOT" then
+            onCelebrationLoot(message)
+        elseif enabled then
+            if not lootSession or not lootSession.open then lootSession = { open = true, items = {} } end
+            captureLoot()
+        end
     end)
 
     C_Timer.NewTicker(0.25, onTick)

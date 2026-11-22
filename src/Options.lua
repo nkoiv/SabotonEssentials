@@ -261,7 +261,8 @@ end
 
 local function createFallbackPanel()
     local panel = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
-    panel:SetSize(360, addon.modules.spyenhancement and 335 or 290)
+    local launchers = (addon.modules.spyenhancement and 1 or 0) + (addon.modules.mobtimer and 1 or 0)
+    panel:SetSize(360, 290 + launchers * 45)
     panel:SetPoint("CENTER")
     panel:SetFrameStrata("DIALOG")
     panel:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", edgeSize = 24, insets = { left = 6, right = 6, top = 6, bottom = 6 } })
@@ -315,6 +316,13 @@ local function createFallbackPanel()
         spy:SetPoint("BOTTOM", 0, 24)
         spy:SetText("Spy Enhancement: sync and options")
         spy:SetScript("OnClick", function() Options:HandleCommand("spyenhancement") end)
+    end
+    if addon.modules.mobtimer then
+        local mob = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        mob:SetSize(290, 24)
+        mob:SetPoint("BOTTOM", 0, addon.modules.spyenhancement and 56 or 24)
+        mob:SetText("Mob Spawn Timer: manage mobs")
+        mob:SetScript("OnClick", function() addon.modules.mobtimer:ToggleEditor() end)
     end
     panel:SetScript("OnShow", function()
         for _, refresh in ipairs(refreshers) do refresh() end
@@ -414,6 +422,10 @@ local function buildModulePanel(rootCategory, moduleKey, schema)
                 end
             end
         end
+    end
+    if schema.action then
+        Settings.RegisterInitializer(subcategory, CreateSettingsButtonInitializer(
+            schema.action.label, schema.action.button, schema.action.run, schema.action.tooltip, true))
     end
     if schema.dashboard then
         Settings.RegisterInitializer(subcategory, CreateSettingsButtonInitializer(

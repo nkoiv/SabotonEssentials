@@ -4,6 +4,7 @@ local frames = {}
 local module
 local horizontal, vertical = 0, 0
 local movement, fade = 0.9, 0.5
+local mobOpened = false
 
 function CreateFrame(kind, ...)
     local frame = { kind = kind, scripts = {} }
@@ -11,6 +12,7 @@ function CreateFrame(kind, ...)
     function frame:SetPoint(...) end
     function frame:SetFrameStrata(...) end
     function frame:SetBackdrop(...) end
+    function frame:SetText(value) self.text = value end
     function frame:EnableMouse(...) end
     function frame:Hide() self.shown = false end
     function frame:Show()
@@ -47,6 +49,7 @@ end
 
 local addon = {
     modules = {
+        mobtimer = { ToggleEditor = function() mobOpened = true end },
         extraattack = {
             GetOptionsSchema = function()
                 return { options = {
@@ -70,6 +73,10 @@ for _, frame in ipairs(frames) do
     if frame.kind == "Slider" then sliders[#sliders + 1] = frame end
 end
 assert(panel:IsShown() and #sliders == 4)
+for _, frame in ipairs(frames) do
+    if frame.text == "Mob Spawn Timer: manage mobs" then frame.scripts.OnClick(frame) end
+end
+assert(mobOpened, "fallback options must open the mob editor")
 sliders[1]:SetValue(200)
 sliders[2]:SetValue(-100)
 assert(horizontal == 200 and vertical == -100)

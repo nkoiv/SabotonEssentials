@@ -1,8 +1,9 @@
 local function noop() end
 local addon = { modules = {}, SaveSettings = noop, Print = function(message) error(message) end }
 function addon.RegisterModule(key, module) addon.modules[key] = module end
+assert(loadfile("src/Support/TimerBars.lua"))("SabotonEssentials", addon)
 LOCALIZED_CLASS_NAMES_MALE = {}
-for _, name in ipairs({ "ExtraAttack", "GatheringTimer", "TankTarget", "SqueakyToy", "SpyEnhancement", "MinimapButton" }) do
+for _, name in ipairs({ "ExtraAttack", "GatheringTimer", "MobTimer", "TankTarget", "SqueakyToy", "SpyEnhancement", "MinimapButton" }) do
     assert(loadfile("src/Modules/" .. name .. ".lua"))("SabotonEssentials", addon)
 end
 
@@ -71,8 +72,13 @@ function CreateFromMixins() return {} end
 assert(loadfile("src/Options.lua"))("SabotonEssentials", addon)
 addon.modules.options:OnEnable()
 assert(writes == 0, "building the UI must not change any saved preferences")
-assert(table.concat(categoryOrder, ",") == "Extra Attack,Gathering Timer,Minimap Button,Spy Enhancement,Squeaky Toy,Tank Target",
+assert(table.concat(categoryOrder, ",") == "Extra Attack,Gathering Timer,Minimap Button,Mob Spawn Timer,Spy Enhancement,Squeaky Toy,Tank Target",
     "module categories must have a stable order")
+local foundMobAction = false
+for _, row in ipairs(categories["Mob Spawn Timer"].rows) do
+    if row.template == "button" and row.data.buttonText == "Manage mobs..." then foundMobAction = true end
+end
+assert(foundMobAction, "mob management must be reachable in native settings")
 for key, schema in pairs(schemas) do
     local section, seen, count = nil, {}, 0
     for _, row in ipairs(categories[schema.name].rows) do

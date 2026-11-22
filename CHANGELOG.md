@@ -1,5 +1,27 @@
 # Saboton Essentials - Changelog
 
+## [0.6.0] - 2026-11-22
+
+- Release the mob spawn timer, minimap timer controls, and gathering celebrations from the 0.5.2 betas. Automatic detection and gathering effects remain subject to the client limitations described in the README.
+
+## [0.5.2-beta.3] - 2026-11-22
+
+- Make the mob timer editor background opaque so underlying options remain readable only outside the window.
+- Add a minimap right-click menu to lock or unlock both timer frames and add the current creature to the mob timer. Idle unlocked frames show draggable placeholders; new mob entries default to 10-15 minutes.
+
+## [0.5.2-beta.2] - 2026-11-22
+
+- Add a separate mob timer editor and concurrent min/max bars. Reuse shared timer-bar rendering with Gathering Timer. Experimental automatic death detection matches UNIT_DIED to previously observed readable creature GUIDs; in-game validation is still required.
+
+## [0.5.2-beta.1] - 2026-11-21
+
+- Add a session-only mob death probe to compare death events, unit-state events, and polling on Forever. Automatic detection still requires in-game testing.
+
+## [0.5.2-beta] - 2026-11-20
+
+- Add per-item gathering celebrations with sparkles and selectable sounds, enabled by default for Arcane Crystal, Fel Crystal, and Black Lotus. Confirm self-loot from a game-object window before celebrating; timer tracking remains independent. Add slash commands to configure and preview celebrations.
+- Update the built-in respawn timer list to include Heavy Thorium Ore and focus on higher-level nodes. Arcane Crystal remains available for celebrations independently of timer tracking.
+
 ## [0.5.1] - 2026-11-19
 
 - Avoid the Tank Target secret threat color-curve error on Forever. Display restricted percentages in neutral white using native text formatting; readable percentages retain their threshold colors.

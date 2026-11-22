@@ -18,7 +18,32 @@ When the player gets an extra attack (Windfury, Hand of Justice, Ironfoe, Sword 
 
 ### Gathering Timer (`gather`)
 
-Starts two countdown bars (min and max respawn) when you loot a tracked ore or herb node. It is off by default and can be enabled in Options or with `/saboton gather enable`. Direct node-spawn detection is not possible on the Forever client (no game-object enumeration, no spawn event, no minimap-blip read), so it's timer-based: the loot of a tracked gatherable is the trigger. The min bar ("node may be up") and max bar ("gone / taken") are independent — each can be toggled off, has its own duration, and plays its own sound (bell chime and impact thud by default). The bar frame is movable (drag while unlocked, out of combat only), resizable, and can fill horizontally or vertically. Each gatherable (Thorium, Arcane Crystal, Black Lotus, etc.) can be toggled on or off individually.
+Starts two countdown bars (min and max respawn) when you loot a tracked ore or herb node. It is off by default and can be enabled in Options or with `/saboton gather enable`. Direct node-spawn detection is not possible on the Forever client (no game-object enumeration, no spawn event, no minimap-blip read), so it's timer-based: the loot of a tracked gatherable is the trigger. The min bar ("node may be up") and max bar ("gone / taken") are independent — each can be toggled off, has its own duration, and plays its own sound (bell chime and impact thud by default). The bar frame is movable (drag while unlocked, out of combat only), resizable, and can fill horizontally or vertically. Each gatherable (Thorium, Black Lotus, etc.) can be toggled on or off individually.
+
+**Gathering celebrations:** While the module is enabled, receiving an enabled item from a game-object loot window plays its chosen sound and shows a brief, non-interactive sparkle burst. Arcane Crystal (12363), Fel Crystal (248819), and Black Lotus (13468) are enabled by default with Ka-ching; other listed or custom gatherables default off. Each item has its own toggle and sound in Options, independent of whether its respawn timer is tracked. Choose **No sound** for sparkles only. Use `/saboton gather testcelebration Fel Crystal` to preview an item's effect and sound without gathering it, even when the module or that item's celebration is disabled.
+
+Celebrations wait for a localized self-loot chat message and a matching item previously seen in a game-object loot window; merely opening a node does not trigger them. Duplicate loot-window events do not repeat the celebration. A message arriving within two seconds of closing the window can still match. If the client hides the loot source or self-loot message, the celebration cannot be confirmed; in-game behavior still needs verification on Forever. Custom gatherables added through the command become available in Settings after reloading the UI; the slash commands work immediately.
+
+### Mob Spawn Timer (`mobtimer`) - experimental
+
+Open `/saboton mobtimer options` to add or edit up to 30 unique mob names with minimum and maximum durations in seconds. Use the sliders for coarse adjustment or type exact values from 1 second to 7 days, then press Save. The Settings page also has a management button; the fallback options window has a launcher. To add the current creature directly, use **Add target** in the editor, **Add current target to mob timer** in the minimap menu, or `/saboton mobtimer target`. Its readable name and creature GUID are required; duplicates are rejected. New entries default to 10 and 15 minutes (600 and 900 seconds) and can be edited afterward. Adding a target tracks it but does not start a timer until a death is detected or it is started manually.
+
+Automatic death detection is enabled by default for configured names. The addon observes readable creature names and GUIDs from target, focus, mouseover, nameplates and boss tokens, then starts the matching timer when `UNIT_DIED` supplies that GUID. Matching is exact and case-insensitive; enter the name as shown by your client. Recently observed identities are retained for up to 30 minutes (bounded to 256 identities), so the mob need not remain targeted. The death event must reach your client, and both its GUID and an observed matching identity must be readable. An unobserved, out-of-range, phased or secret mob may be missed; duplicate death events for a GUID are ignored for up to 30 minutes. Use `/saboton mobtimer status` to see registration and session counters; `/saboton mobtimer enable` toggles detection. If event registration fails the addon reports it, and manual timers remain usable. Automatic detection still requires in-game testing.
+
+Select an entry with the arrows and use **Test 5s/10s** or **Start manual** to preview two bars. Multiple mobs can run concurrently; a new detected death or manual start for the same entry replaces its timer. This is one timer per name, not per spawn location or creature instance. Editing an entry does not change its running timer, and removing it clears its timer. Timers are estimates only and do not detect respawns. Settings and entries are saved, but active timers and observed identities do not survive reload. Unlocking shows a draggable placeholder when no bars are visible; dragging is disabled in combat. Appearance, sounds and minimum/maximum visibility are separately configurable from gathering.
+
+Commands: `/saboton mobtimer target`, `enable`, `status`, `add <name> <min seconds> <max seconds>`, `edit <name> <min> <max>`, `list`, `test <exact name>`, `start <exact name>`, `remove <exact name>`, `clear`, `lock`, `unlock`, `width <60-500>`, `height <8-60>`, `orient <h|v>`, `minbar`, `maxbar`, `minsound <key>`, and `maxsound <key>`. Sound keys are `none`, `ding`, `thud`, `kaching`, `squeak`, and `huagh`.
+
+### Mob death probe (`mobprobe`) - experimental
+
+This session-only diagnostic compares `UNIT_DIED`, `UNIT_HEALTH` / `UNIT_FLAGS`, and a half-second `UnitIsDeadOrGhost` poll for a manually watched target. It does not start spawn timers or save its results. Event registration is attempted only when started; the restricted combat-log event is never registered.
+
+1. Run `/saboton mobprobe start`, target a **living** mob, then run `/saboton mobprobe watch`. Check that the reported GUID is readable and the initial state is alive.
+2. Kill it while targeted. Run `/saboton mobprobe status` and note whether `UNIT_DIED` matched, a unit event reported a transition, and polling reported a transition.
+3. Repeat with a new living target and `/saboton mobprobe watch`: let another player kill it, or remove your target while its nameplate remains visible. Finally try a kill after the watched mob is no longer visible. Compare the output; "cached identity matched" means the event matched the GUID captured at watch time, but no current token was found.
+4. Run `/saboton mobprobe status` before `/saboton mobprobe stop` and share the output and the test conditions. Counts are cumulative since `start`, including unrelated unit events; stop and start between scenarios for separate counts. Live messages are capped at 40 per session. A secret or missing GUID cannot be matched, and a dead observation after an unreadable state is not proof of an observed death transition.
+
+The probe prints the watched name and diagnostic results in chat but does not print GUIDs. Review chat before sharing it. `/reload` stops the probe and discards results. No result guarantees detection of distant or unobserved deaths, or that a timer predicts an actual spawn.
 
 ### Tank Target (`tanktarget`)
 
@@ -98,7 +123,7 @@ Spy Enhancement's Settings subcategory uses native sync, reason-sharing, and not
 
 ### Minimap Button (`minimap`)
 
-A draggable minimap button (Thunder Clap icon) that opens the Options panel when clicked. Can be dragged around the minimap, and hidden via a checkbox in Options or `/saboton minimap`.
+A draggable minimap button (Thunder Clap icon) that opens Options on left-click. Right-click for **Unlock bar movement** or **Lock bar movement** and to add the current target to the mob timer. Unlocking affects both the Gathering and Mob timer frames, showing placeholders when they have no visible timers; drag each with the left mouse button outside combat. If their lock states differ, the menu offers to unlock both. Locking hides idle placeholders without stopping timers. The button can be dragged around the minimap and hidden via a checkbox in Options or `/saboton minimap`. If the client menu API is unavailable, the individual `/saboton gather lock` / `unlock` and `/saboton mobtimer lock` / `unlock` commands remain available.
 
 ## Installation
 
@@ -121,6 +146,8 @@ Settings, custom gatherables, and frame positions are stored in the account-wide
 All commands go through `/saboton <module> <command>`.
 
 - `/saboton help` - list available modules
+- `/saboton mobtimer options` - open the manual mob-timer editor
+- `/saboton mobprobe start` / `watch` / `status` / `stop` - run the experimental mob-death diagnostic described above
 - `/saboton squeak status` - print the current trigger and sound configuration
 - `/saboton squeak test` - play the configured sound
 - `/saboton squeak debug` - toggle debug messages
@@ -150,7 +177,10 @@ All commands go through `/saboton <module> <command>`.
 - `/saboton gather width <px>` / `height <px>` - resize the bars
 - `/saboton gather orient <h|v>` - horizontal or vertical fill
 - `/saboton gather min <seconds>` / `max <seconds>` - set the respawn window for active and future timers; 0 disables that bar
-- `/saboton gather minsound <key>` / `maxsound <key>` - set the expiry sounds (`ding`, `thud`, `kaching`, `squeak`)
+- `/saboton gather minsound <key>` / `maxsound <key>` - set the expiry sounds (`none`, `ding`, `thud`, `kaching`, `squeak`, `huagh`)
+- `/saboton gather celebrate <exact name|id>` - toggle an item's celebration
+- `/saboton gather celebrationsound <exact name|id> <key>` - choose its celebration sound from the same sound keys
+- `/saboton gather testcelebration <exact name|id>` - preview its sparkles and sound
 - `/saboton gather toggle <name|id>` - toggle tracking for one gatherable (e.g. `toggle thorium`)
 - `/saboton gather add <id|name> <ore|herb> <min> <max>` - add a custom gatherable
 - `/saboton gather list` - list all gatherables and their state
@@ -207,7 +237,7 @@ All commands go through `/saboton <module> <command>`.
 - `src\Options.lua` builds the shared settings panel using Blizzard's `Settings` API (`Settings.RegisterVerticalLayoutCategory`/`Settings.RegisterProxySetting`/`Settings.CreateCheckbox`/`Settings.CreateSlider`/`Settings.CreateDropdown`); it reads a `GetOptionsSchema()` method from any module that implements one and never touches module internals directly, keeping UI code separate from feature logic
 - The vertical-list Settings API has no built-in free-text control, so a schema option of `type = "text"` is rendered via a small custom row template (`SabotonTextInputControlTemplate` in `src\Options.xml`), styled and positioned like the built-in checkbox/slider/dropdown rows, backed by `SabotonTextInputControlMixin` in `src\Options.lua`
 - Where Blizzard's `Settings` API is unavailable, the Options command opens a small window for the combo-text position and timing sliders, plus a Spy dashboard launcher. The Spy dashboard also opens directly via its options command; use slash commands for remaining settings.
-- The minimap button repositions itself by tracking cursor angle around the `Minimap` frame during drag (the common community pattern also used by libraries like LibDBIcon); it opens Options by calling `addon.modules.options:HandleCommand()` directly rather than touching the `Settings` API itself, keeping Settings-API code confined to `src\Options.lua`
+- The minimap button repositions itself by tracking cursor angle around the `Minimap` frame during drag (the common community pattern also used by libraries like LibDBIcon); left-click opens Options without touching the `Settings` API itself, and right-click opens the timer controls.
 
 ## Tests
 
@@ -215,9 +245,19 @@ Run the Lua files in `tests/` from the addon root with a Lua interpreter. They u
 
 The guild-sync tests simulate multiple clients, restrictions, lost data/ACKs, throttling, concurrent initiators, invalid records, and transfer limits. Run `tests/test_guild_sync.lua` for the transport, `tests/test_guild_sync_recovery.lua` for twenty-client bursts, disconnects/reconnects and exact idle-timeout boundaries, `tests/test_spy_enhancement.lua` for the Spy adapter, and `tests/test_spy_options.lua` for modern/fallback dashboard controls, alongside the persistence/core tests. Basic two-client transfers were confirmed in-game on beta.3; twenty-client load, Forever sender/receiver combat, roster behavior, and visual layout still require in-game validation before release.
 
-All twelve Lua test suites passed with Fengari, including the Tank Target suite's restricted threat formatting, secret-value matching, GUID/identity fallback, manual-pick, and enable/disable paths. The recovery tests verify bounded queue drainage and successful transfers under their simulated conditions, not guaranteed all-to-all convergence or real server throughput.
+All fourteen Lua test suites passed with Fengari, including the mob timer and probe tests and the Tank Target suite's restricted threat formatting, secret-value matching, GUID/identity fallback, manual-pick, and enable/disable paths. The recovery tests verify bounded queue drainage and successful transfers under their simulated conditions, not guaranteed all-to-all convergence or real server throughput.
 
 ## Releases
+
+Version `0.6.0` includes the Mob Spawn Timer, minimap timer controls, and gathering celebrations from the 0.5.2 betas. Detection remains subject to the client limitations described above.
+
+Version `0.5.2-beta.3` adds minimap timer controls, current-target mob tracking, and an opaque mob editor background.
+
+Version `0.5.2-beta.2` adds the experimental Mob Spawn Timer, including automatic death detection and manual previews; in-game validation is still required.
+
+Version `0.5.2-beta.1` adds the experimental mob death probe for in-game testing. It retains the gathering changes from `0.5.2-beta`.
+
+Version `0.5.2-beta` adds per-item gathering celebrations and updates the built-in respawn timer list. The visual effect and self-loot confirmation still need in-game testing on Forever.
 
 Version `0.5.1` includes the `0.5.0-beta` changes below and fixes a Tank Target chat error on Forever: restricted threat percentages are displayed in neutral white without using a color curve.
 

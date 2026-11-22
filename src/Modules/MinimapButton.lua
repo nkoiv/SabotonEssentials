@@ -1,6 +1,6 @@
 local ADDON_NAME, addon = ...
 
--- Draggable minimap button that opens the shared Options panel.
+-- Draggable minimap button for options and timer controls.
 local MinimapButton = {}
 
 local ICON_TEXTURE = "Interface\\Icons\\Spell_Nature_ThunderClap"
@@ -9,6 +9,24 @@ local DEFAULT_ANGLE = 225
 
 local shown = true
 local angle = DEFAULT_ANGLE
+
+local function openMenu(button)
+    if not (MenuUtil and MenuUtil.CreateContextMenu) then
+        addon.Print("Minimap menu unavailable. Use /saboton gather unlock, /saboton mobtimer unlock, or /saboton mobtimer target.")
+        return
+    end
+    MenuUtil.CreateContextMenu(button, function(_, root)
+        root:CreateTitle("Saboton Essentials")
+        local gather, mob = addon.modules.gather, addon.modules.mobtimer
+        local allUnlocked = not gather:IsLocked() and not mob:IsLocked()
+        root:CreateButton(allUnlocked and "Lock bar movement" or "Unlock bar movement", function()
+            gather:SetLocked(allUnlocked)
+            mob:SetLocked(allUnlocked)
+            if addon.SaveSettings then addon.SaveSettings() end
+        end)
+        root:CreateButton("Add current target to mob timer", function() mob:AddCurrentTarget() end)
+    end)
+end
 
 local function updatePosition(button)
     local x = math.cos(math.rad(angle)) * RADIUS
@@ -37,6 +55,7 @@ local function createButton()
     border:SetSize(53, 53)
     border:SetPoint("TOPLEFT")
 
+    button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     button:RegisterForDrag("LeftButton")
     button:SetScript("OnDragStart", function(self)
         self:SetScript("OnUpdate", function()
@@ -53,14 +72,16 @@ local function createButton()
         if addon.SaveSettings then addon.SaveSettings() end
     end)
 
-    button:SetScript("OnClick", function()
-        addon.modules.options:HandleCommand()
+    button:SetScript("OnClick", function(self, mouseButton)
+        if mouseButton == "RightButton" then openMenu(self)
+        else addon.modules.options:HandleCommand() end
     end)
 
     button:SetScript("OnEnter", function(self)
         GameTooltip:SetOwner(self, "ANCHOR_LEFT")
         GameTooltip:AddLine("Saboton Essentials")
-        GameTooltip:AddLine("Click to open options", 1, 1, 1)
+        GameTooltip:AddLine("Left-click to open options", 1, 1, 1)
+        GameTooltip:AddLine("Right-click for timer controls", 1, 1, 1)
         GameTooltip:Show()
     end)
     button:SetScript("OnLeave", function()

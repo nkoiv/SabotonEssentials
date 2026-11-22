@@ -1,7 +1,7 @@
 local frames, controls, messages, lootName
 local methods = {}
 local function noop() end
-for _, name in ipairs({ "SetSize", "SetFrameStrata", "SetFrameLevel", "SetHighlightTexture", "SetTexture", "SetTexCoord", "RegisterForDrag", "SetMovable", "SetClampedToScreen", "EnableMouse", "SetAllPoints", "SetMinMaxValues", "SetValue", "SetStatusBarTexture", "SetOrientation", "SetColorTexture", "SetHeight", "SetWidth", "SetAlpha", "SetStatusBarColor", "SetText", "SetDrawLayer", "StartMoving", "StopMovingOrSizing", "SetJustifyH", "SetJustifyV", "SetHitRectInsets", "SetEnabled", "SetChecked" }) do
+for _, name in ipairs({ "SetSize", "SetFrameStrata", "SetFrameLevel", "SetHighlightTexture", "SetTexture", "SetTexCoord", "RegisterForClicks", "RegisterForDrag", "SetMovable", "SetClampedToScreen", "EnableMouse", "SetAllPoints", "SetMinMaxValues", "SetValue", "SetStatusBarTexture", "SetOrientation", "SetColorTexture", "SetHeight", "SetWidth", "SetAlpha", "SetStatusBarColor", "SetText", "SetDrawLayer", "StartMoving", "StopMovingOrSizing", "SetJustifyH", "SetJustifyV", "SetHitRectInsets", "SetEnabled", "SetChecked" }) do
     methods[name] = noop
 end
 function methods:SetPoint(point, relative, relativePoint, x, y) self.x, self.y = x or 0, y or 0 end
@@ -13,6 +13,8 @@ function methods:GetStatusBarTexture() return self end
 function methods:Show() self.shown = true end
 function methods:Hide() self.shown = false end
 function methods:SetShown(value) self.shown = value end
+function methods:EnableMouse(value) self.mouseEnabled = value end
+function methods:StartMoving() self.moving = true end
 function methods:SetScript(name, callback) self.scripts[name] = callback end
 function methods:RegisterEvent(event) self.events[event] = true end
 function methods:UnregisterEvent(event) self.events[event] = nil end
@@ -86,7 +88,7 @@ local function session(saved)
     DEFAULT_CHAT_FRAME = { AddMessage = function(_, message) messages[#messages + 1] = message end }
     SabotonEssentialsDB = saved
     local addon = {}
-    for _, file in ipairs({ "src/Core.lua", "src/Modules/SqueakyToy.lua", "src/Modules/ExtraAttack.lua", "src/Modules/GatheringTimer.lua", "src/Modules/TankTarget.lua", "src/Modules/MinimapButton.lua", "src/Support/GuildSync.lua", "src/Modules/SpyEnhancement.lua", "src/Options.lua" }) do
+    for _, file in ipairs({ "src/Core.lua", "src/Support/TimerBars.lua", "src/Modules/SqueakyToy.lua", "src/Modules/ExtraAttack.lua", "src/Modules/GatheringTimer.lua", "src/Modules/MobTimer.lua", "src/Modules/TankTarget.lua", "src/Modules/MinimapButton.lua", "src/Support/GuildSync.lua", "src/Modules/SpyEnhancement.lua", "src/Options.lua" }) do
         assert(loadfile(file))("SabotonEssentials", addon)
     end
     fire("ADDON_LOADED", "SabotonEssentials")
@@ -106,8 +108,11 @@ control("SPYENHANCEMENT", "SHAREKOSREASONS").set(true)
 slash("gather enable")
 slash("gather add Mystic Herb herb 60 120")
 slash("gather add Another Herb herb 70 140")
+slash("mobtimer add High Chief Winterfall 3600 7200")
+control("MOBTIMER", "WIDTH").set(245)
+control("MOBTIMER", "DETECTIONENABLED").set(false)
 slash("gather toggle Another Herb")
-slash("gather toggle Copper")
+slash("gather toggle Iron")
 slash("extraattack window 1.7")
 slash("extraattack minhits 3")
 slash("extraattack textformat Streak %d")
@@ -116,6 +121,8 @@ slash("squeak debug")
 slash("spyenhancement detect player ЇЁ")
 control("EXTRAATTACK", "TEXTARCDURATION").set(1.8)
 control("GATHER", "WIDTH").set(245)
+control("GATHER", "CELEBRATE_12363").set(false)
+control("GATHER", "CELEBRATION_SOUND_248819").set("squeak")
 control("MINIMAP", "SHOWBUTTON").set(false)
 control("TANKTARGET", "THREATLOW").set(85)
 control("TANKTARGET", "THREATHIGH").set(95)
@@ -146,6 +153,10 @@ assert(saved.modules.gather.state.position.x == 125 and saved.modules.gather.sta
 assert(math.abs(saved.modules.minimap.state.angle - 90) < 0.001)
 
 addon = session(saved)
+assert(addon.modules.mobtimer:GetPersistentState().entries[1].name == "High Chief Winterfall")
+assert(addon.modules.mobtimer:GetPersistentState().entries[1].minSeconds == 3600)
+assert(control("MOBTIMER", "WIDTH").get() == 245)
+assert(not control("MOBTIMER", "DETECTIONENABLED").get(), "disabled automatic detection must survive reload")
 assert(control("SPYENHANCEMENT", "SHAREKOSREASONS").get(), "reason-sharing preference must survive reload")
 assert(addon.modules.spyenhancement:GetPersistentState().syncState.lastSyncTime == 0)
 slash("spyenhancement detect player ЇЁ")
@@ -159,9 +170,11 @@ assert(control("EXTRAATTACK", "TEXTARCDURATION").get() == 1.8)
 assert(control("SQUEAK", "ANYHOSTILEDEATH").get())
 assert(addon.modules.squeak:GetPersistentState().debug)
 assert(control("GATHER", "WIDTH").get() == 245)
-assert(control("GATHER", "GATHER_2770").get())
-assert(control("GATHER", "GATHER_CUSTOM_19").get())
-assert(not control("GATHER", "GATHER_CUSTOM_20").get())
+assert(control("GATHER", "GATHER_2772").get())
+assert(control("GATHER", "GATHER_CUSTOM_9").get())
+assert(not control("GATHER", "GATHER_CUSTOM_10").get())
+assert(not control("GATHER", "CELEBRATE_12363").get())
+assert(control("GATHER", "CELEBRATION_SOUND_248819").get() == "squeak")
 assert(not control("MINIMAP", "SHOWBUTTON").get())
 assert(control("TANKTARGET", "THREATLOW").get() == 85)
 assert(control("TANKTARGET", "THREATHIGH").get() == 95)
@@ -190,6 +203,65 @@ fire("LOOT_READY")
 slash("gather status")
 assert(said("min 300s / max 450s"), "explicit duration overrides were not restored")
 assert(SabotonEssentialsDB.modules.gather.state.position.x == 125)
+
+addon = session(nil)
+local menu
+MenuUtil = { CreateContextMenu = function(owner, build)
+    menu = {}
+    local root = { CreateTitle = noop, CreateButton = function(_, label, callback) menu[label] = callback end }
+    build(owner, root)
+end }
+button = addon.modules.minimap.button
+local opened = false
+local originalOpen = addon.modules.options.HandleCommand
+addon.modules.options.HandleCommand = function() opened = true end
+button.scripts.OnClick(button, "LeftButton")
+assert(opened, "left click still opens options")
+addon.modules.options.HandleCommand = originalOpen
+button.scripts.OnClick(button, "RightButton")
+assert(menu["Unlock bar movement"])
+menu["Unlock bar movement"]()
+assert(not control("GATHER", "LOCKED").get() and not control("MOBTIMER", "LOCKED").get())
+assert(addon.modules.gather.frame.shown and addon.modules.mobtimer.frame.shown, "unlock exposes idle frames")
+assert(addon.modules.gather.frame.mouseEnabled and addon.modules.mobtimer.frame.mouseEnabled)
+InCombatLockdown = function() return true end
+addon.modules.gather.frame.scripts.OnDragStart(addon.modules.gather.frame)
+assert(not addon.modules.gather.frame.moving, "dragging is blocked in combat")
+InCombatLockdown = function() return false end
+addon.modules.gather.frame.scripts.OnDragStart(addon.modules.gather.frame)
+assert(addon.modules.gather.frame.moving, "unlocked frames can be dragged")
+InCombatLockdown = nil
+local originalUnitName = UnitName
+UnitGUID = function(unit) if unit == "target" then return "Creature-0-0-0-0-123-1" end end
+UnitName = function(unit) if unit == "target" then return "Menu Mob" end return originalUnitName(unit) end
+assert(menu["Add current target to mob timer"])
+menu["Add current target to mob timer"]()
+assert(SabotonEssentialsDB.modules.mobtimer.state.entries[1].name == "Menu Mob")
+assert(SabotonEssentialsDB.modules.mobtimer.state.entries[1].minSeconds == 600)
+UnitGUID, UnitName = nil, originalUnitName
+addon.modules.mobtimer.frame.x, addon.modules.mobtimer.frame.y = 42, -80
+addon.modules.mobtimer.frame.scripts.OnDragStop(addon.modules.mobtimer.frame)
+saved = SabotonEssentialsDB
+addon = session(saved)
+assert(not control("GATHER", "LOCKED").get() and not control("MOBTIMER", "LOCKED").get())
+assert(addon.modules.mobtimer.frame.shown and addon.modules.mobtimer.frame.x == 42 and addon.modules.mobtimer.frame.y == -80)
+assert(addon.modules.mobtimer:GetPersistentState().entries[1].name == "Menu Mob")
+button = addon.modules.minimap.button
+button.scripts.OnClick(button, "RightButton")
+assert(menu["Lock bar movement"])
+menu["Lock bar movement"]()
+assert(control("GATHER", "LOCKED").get() and control("MOBTIMER", "LOCKED").get())
+assert(not addon.modules.gather.frame.shown and not addon.modules.mobtimer.frame.shown, "locking hides idle previews")
+assert(not addon.modules.gather.frame.mouseEnabled and not addon.modules.mobtimer.frame.mouseEnabled)
+assert(SabotonEssentialsDB.modules.gather.locked and SabotonEssentialsDB.modules.mobtimer.locked)
+control("GATHER", "LOCKED").set(false)
+button.scripts.OnClick(button, "RightButton")
+assert(menu["Unlock bar movement"], "mixed state offers unlock")
+menu["Unlock bar movement"]()
+assert(not control("GATHER", "LOCKED").get() and not control("MOBTIMER", "LOCKED").get())
+MenuUtil = nil
+button.scripts.OnClick(button, "RightButton")
+assert(said("Minimap menu unavailable"))
 
 addon = session(nil)
 local expected = {}
