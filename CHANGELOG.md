@@ -1,5 +1,9 @@
 # Saboton Essentials - Changelog
 
+## [0.7.1] - 2026-11-23
+
+- Add an opt-in Miss Alerts option to announce the ability and miss outcome in SAY chat, creating an overhead speech bubble. The test preview does not send chat messages.
+
 ## [0.7.0-beta.3] - 2026-11-23
 
 - Add configurable Miss Alerts sound and text positioning/timing. The default sound is now HUAGH; select thud to retain the previous sound.

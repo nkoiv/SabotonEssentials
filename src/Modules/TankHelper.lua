@@ -6,6 +6,7 @@ local CORRELATION_WINDOW = 0.01
 local UNLIMITED_WINDOW = 120
 local SOUND_OPTIONS = addon.TimerBars.SOUNDS
 local enabled, soundEnabled, textEnabled = true, true, true
+local sayEnabled = false
 local soundKey = "huagh"
 local textOffsetX, textOffsetY = -200, 200
 local textArcDuration, textFadeDuration = 0.9, 0.5
@@ -306,8 +307,11 @@ local function animate(display, elapsed)
     end
 end
 
-local function alert(id, outcome)
+local function alert(id, outcome, test)
     local label = addon.Spells.Label(id) .. ": " .. outcome
+    if sayEnabled and not test then
+        SendChatMessage(label, "SAY")
+    end
     if textEnabled then
         local display = TankHelper.display
         display.text:SetText(label)
@@ -391,6 +395,10 @@ function TankHelper:GetOptionsSchema()
                         TankHelper.display:Hide()
                     end
                 end },
+            { type = "checkbox", key = "sayEnabled", section = "Alerts", label = "Announce misses in Say chat",
+                tooltip = "Send the spell and miss outcome in Say chat, showing a speech bubble above your character. Nearby players can see it.",
+                default = false, get = function() return sayEnabled end,
+                set = function(value) sayEnabled = value end },
             { type = "slider", key = "textOffsetX", section = "Alerts", dependsOn = "textEnabled",
                 label = "Alert text horizontal offset", tooltip = "Move the entire arc left or right from screen center.",
                 min = -600, max = 600, step = 10, default = -200, format = "%d",
@@ -562,6 +570,9 @@ function TankHelper:HandleCommand(message)
     elseif command == "sound" then
         soundEnabled = not soundEnabled
         addon.Print("Miss Alerts sound " .. (soundEnabled and "enabled" or "disabled") .. ".")
+    elseif command == "say" then
+        sayEnabled = not sayEnabled
+        addon.Print("Miss Alerts Say chat " .. (sayEnabled and "enabled" or "disabled") .. ".")
     elseif command == "soundkey" then
         local key = rest:lower()
         if setSound(key) then addon.Print("Miss Alerts sound set to " .. findSound(key).label .. ".") end
@@ -609,15 +620,16 @@ function TankHelper:HandleCommand(message)
         else changeSpell(command, rest) end
         if self.spellEditor and self.spellEditor:IsShown() then self.spellEditor:Refresh() end
     elseif command == "test" then
-        alert(11601, "DODGE")
+        alert(11601, "DODGE", true)
     elseif command == "alertstatus" then
         addon.Print("Miss Alerts " .. (enabled and "enabled" or "disabled") .. "; window "
             .. windowLabel(fightWindow) .. "; use /saboton missalerts spells to list tracked spells.")
+        addon.Print("Miss Alerts Say chat: " .. (sayEnabled and "on" or "off") .. ".")
         addon.Print("Miss Alerts sound: " .. (soundEnabled and findSound(soundKey).label or "off")
             .. "; text: " .. (textEnabled and "on" or "off") .. "; offset: "
             .. textOffsetX .. ", " .. textOffsetY .. "; movement: " .. textArcDuration .. "s; fade: " .. textFadeDuration .. "s.")
     else
-        addon.Print("Miss Alerts: enable, sound, soundkey <key>, text, xoffset, yoffset, movement, fade, window, spells, add, remove, test, alertstatus. Probe: start, status, mark, stop.")
+        addon.Print("Miss Alerts: enable, sound, say, soundkey <key>, text, xoffset, yoffset, movement, fade, window, spells, add, remove, test, alertstatus. Probe: start, status, mark, stop.")
     end
 end
 

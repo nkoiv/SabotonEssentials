@@ -1,6 +1,7 @@
 local module, frame, alertFrame
 local messages = {}
 local sounds = {}
+local chatMessages = {}
 local soundSucceeds = true
 local now = 100
 local secret = {}
@@ -9,6 +10,9 @@ local unavailable
 function issecretvalue(value) return value == secret end
 function GetTime() return now end
 function PlaySoundFile(path) sounds[#sounds + 1] = path return soundSucceeds end
+function SendChatMessage(message, channel)
+    chatMessages[#chatMessages + 1] = { message = message, channel = channel }
+end
 UIParent = {}
 function CreateFrame()
     local object = { events = {}, scripts = {} }
@@ -149,13 +153,20 @@ module.display.scripts.OnUpdate(module.display, 0.95)
 assert(not module.display.shown and not module.display.scripts.OnUpdate)
 event("UNIT_COMBAT", "target", "DODGE")
 assert(#sounds == 1, "one cast must not produce multiple alerts")
+assert(#chatMessages == 0 and not option("sayEnabled").get(), "Say announcements must be off by default")
 
 local function cast(id) event("UNIT_SPELLCAST_SUCCEEDED", "player", "cast", id or 23925) end
 local function outcome(value) event("UNIT_COMBAT", "target", value) end
+option("sayEnabled").set(true)
 cast() outcome("MISS")
 assert(#sounds == 2 and module.display.text.value == "Spell 23925: MISS")
+assert(#chatMessages == 1 and chatMessages[1].message == "Spell 23925: MISS"
+    and chatMessages[1].channel == "SAY", "enabled alerts should announce the spell and outcome in Say chat")
 cast() outcome("PARRY")
 assert(#sounds == 3)
+assert(#chatMessages == 2 and chatMessages[2].message == "Spell 23925: PARRY"
+    and chatMessages[2].channel == "SAY")
+option("sayEnabled").set(false)
 cast() outcome("WOUND") outcome("MISS")
 assert(#sounds == 3, "a hit consumes the candidate cast")
 cast() now = now + 0.011 outcome("MISS")
@@ -203,8 +214,12 @@ cast(12345) outcome("MISS")
 assert(#sounds == 6 and not module.display.shown)
 option("textEnabled").set(true)
 option("soundEnabled").set(true)
+option("sayEnabled").set(true)
+local chatCount = #chatMessages
 module:HandleCommand("test")
 assert(#sounds == 7 and module.display.shown)
+assert(#chatMessages == chatCount, "test preview must not send a Say message")
+option("sayEnabled").set(false)
 event("PLAYER_REGEN_ENABLED")
 now = 300
 event("PLAYER_REGEN_DISABLED")
@@ -321,4 +336,8 @@ module.display.scripts.OnUpdate(module.display, 0.5)
 assert(not module.display.shown)
 module:HandleCommand("movement 0")
 assert(option("textArcDuration").get() == 2 and has("Usage: /saboton missalerts movement"))
+module:HandleCommand("say")
+assert(option("sayEnabled").get() and has("Miss Alerts Say chat enabled."))
+module:HandleCommand("say")
+assert(not option("sayEnabled").get() and has("Miss Alerts Say chat disabled."))
 print("Tank helper diagnostic and alert tests passed")
