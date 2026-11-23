@@ -22,7 +22,7 @@ function addon.SaveSettings()
         if module.GetOptionsSchema then
             local values = {}
             for _, spec in ipairs(module:GetOptionsSchema().options or {}) do
-                if spec.get and spec.key then values[spec.key] = spec.get() end
+                if spec.get and spec.key and not spec.transient then values[spec.key] = spec.get() end
             end
             data.modules[name] = values
         end
@@ -46,7 +46,7 @@ function addon.ApplySettings(data)
                 for _, spec in ipairs(module:GetOptionsSchema().options or {}) do
                     local value = values[spec.key]
                     local expected = spec.type == "checkbox" and "boolean" or spec.type == "slider" and "number" or "string"
-                    if spec.set and type(value) == expected and (expected ~= "number" or (value == value and math.abs(value) < math.huge)) then spec.set(value) end
+                    if not spec.transient and spec.set and type(value) == expected and (expected ~= "number" or (value == value and math.abs(value) < math.huge)) then spec.set(value) end
                 end
             end
         end
@@ -64,7 +64,7 @@ end
 local function printHelp()
     addon.Print("Commands: /saboton <module> <command>")
     for name in pairs(addon.modules) do
-        addon.Print("  " .. name)
+        addon.Print("  " .. (name == "tankhelper" and "missalerts" or name))
     end
 end
 
@@ -77,7 +77,7 @@ local function dispatch(message)
         return
     end
 
-    local module = addon.modules[moduleName]
+    local module = addon.modules[moduleName == "missalerts" and "tankhelper" or moduleName]
     if not module then
         addon.Print("Unknown module: " .. moduleName)
         printHelp()

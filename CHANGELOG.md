@@ -1,5 +1,24 @@
 # Saboton Essentials - Changelog
 
+## [0.7.0-beta.3] - 2026-11-23
+
+- Add configurable Miss Alerts sound and text positioning/timing. The default sound is now HUAGH; select thud to retain the previous sound.
+- Replace duplicate ID fields and the view-only dropdown with a spell manager that groups ranks by name and supports adding and removing tracked entries.
+
+## [0.7.0-beta.2] - 2026-11-23
+
+- Rename Tank Helper to Miss Alerts; `/saboton tankhelper` remains an alias and existing settings are retained.
+- Make the Miss Alerts window slider's maximum setting unlimited for the entire combat, including saved values previously set to 120 seconds.
+- Add shared spell-name lookup and name-based Miss Alerts management. Names track all matching ranks, including new ranks, while existing individual-ID settings remain intact.
+
+## [0.7.0-beta.1] - 2026-11-23
+
+- Add experimental early-combat Tank Helper alerts: correlate tracked player casts with nearby target misses, dodges, or parries, and play a thud with left-moving text. Attribution is heuristic and requires in-game verification.
+
+## [0.7.0-beta] - 2026-11-22
+
+- Add an opt-in Tank Helper diagnostic to capture timestamped casts and combat events for in-game investigation of missed abilities. Automatic miss alerts are not implemented yet.
+
 ## [0.6.0] - 2026-11-22
 
 - Release the mob spawn timer, minimap timer controls, and gathering celebrations from the 0.5.2 betas. Automatic detection and gathering effects remain subject to the client limitations described in the README.

@@ -16,6 +16,26 @@ When a player of a configurable class (Mage by default) in your party or raid di
 
 When the player gets an extra attack (Windfury, Hand of Justice, Ironfoe, Sword Specialization, etc.), play a sound and track a combo streak on-screen. The combo text arcs rightward on each qualifying hit, then fades after the movement and streak window finish. Its position, movement time, and fade time are adjustable in Options. Detection uses early main-hand `PLAYER_SWING` events as a heuristic for extra attacks and `SPELL_UPDATE_COOLDOWN` for Windfury Totem (one hit per proc; each totem rank uses its own proc spell: 8516, 10608, 10610) and Windfury Weapon (two hits per proc; rank spells 8232, 8235, 10486, 16362, plus proc spell 439440). The optional, experimental "Count Seal of Command procs" setting is off by default and counts a cooldown update for observed proc spell 20424 as one extra attack; seal activation and Judgement spells are ignored. Whether other ranks use the same proc ID on Forever still needs in-game verification. Unusual swing timing may affect the swing-based detection. Multiple hits play a staggered, rising sound cascade after a short settle window. The minimum extra attacks for sound and text is adjustable from 1 to 10 (default 1); only hits in the same burst count toward the threshold. Text appears as soon as the burst qualifies and shows the full combo streak, including hits from smaller bursts. A burst settles after 0.15 seconds without another hit, independently of the combo streak window.
 
+### Miss Alerts (`missalerts`) - experimental
+
+During the first 20 seconds after you enter combat, an enabled-by-default alert plays HUAGH and shows the ability and outcome in text that arcs left when a tracked player cast is followed within 0.01 seconds by a `MISS`, `DODGE`, or `PARRY` on your current target. In Options, choose the sound (HUAGH, impact thud, bell, ka-ching, squeak or none) and adjust the text's position, movement and fade times. The combat window, tracked spells, sound and text can also be toggled or changed. `/saboton missalerts test` previews the configured effect; `/saboton missalerts enable` toggles it. The default list covers Shield Slam ranks 23922-23925 and Revenge ranks 6572, 6574, 7379, 11600, and 11601. The old `/saboton tankhelper` command remains an alias, and existing settings are retained.
+
+In Miss Alerts Options, choose **Manage spells...** to view the tracked spells grouped by name. Enter a localized spell name or an ID and select **Add**; **Remove** removes the displayed spell and all of its listed entries. Names track all ranks with that name, including ranks learned later, by comparing the client's readable localized spell names at cast time; different abilities sharing a name also match. An ID tracks one specific rank. The editor marks all-rank entries and counts individually tracked IDs; unresolved names appear as spell IDs. The editor is also available via `/saboton missalerts options` and the fallback options window.
+
+For example, `/saboton missalerts add Revenge` adds all ranks via chat. `/saboton missalerts remove Revenge` removes all matching named and individual-rank entries; supplying an ID instead removes only that individual ID, not an all-rank entry. `/saboton missalerts spells` lists each tracked ID and all-rank entry. If names are unavailable or restricted, name-matched casts may be missed and the addon reports the limitation; try the exact name from your spellbook out of combat or use an ID.
+
+Set the alert window slider to its far-right position, **Unlimited**, to keep alerts active for the whole combat instead of stopping at 120 seconds. Values from 1 to 119 limit alerts to that many seconds. The command `/saboton missalerts window 120` selects Unlimited too. A saved 120-second setting from an earlier beta now means Unlimited.
+
+**Attribution is an experimental timing heuristic, not a confirmed combat-log result.** Forever's `UNIT_COMBAT` does not identify the attacker or ability. A coincident auto-attack or another player's attack may cause a false alert, while a later, reordered, secret or missing event may be missed. A target change, another cast by you, or the first target outcome consumes or clears the pending match. Only a combat-entry event observed after loading starts the timer; reloading or enabling mid-combat does not restart the window. Alerts are not guaranteed and may need adjustment based on in-game testing.
+
+The opt-in, session-only diagnostic remains available. It prints timestamped player `UNIT_SPELLCAST_SUCCEEDED`, target/player `UNIT_COMBAT`, `COMBAT_TEXT_UPDATE`, target changes, and combat boundaries, including readable event arguments or `<secret>`. It does not register the restricted combat-log event. It reports unsupported event registrations and caps live output at 120 lines; status counts continue after the cap. Event arguments may include names or other game information, so review chat output before sharing it.
+
+1. Out of combat, run `/saboton missalerts start`. Fight a mob solo, keeping it targeted; avoid other attackers so the trace is easier to interpret.
+2. Cast Shield Slam and Revenge, and note the visible result of each cast, especially misses, dodges, and parries. Record successful hits too. Optionally use `/saboton missalerts mark` in a macro to insert a timestamped marker.
+3. Run `/saboton missalerts status`, then `/saboton missalerts stop`. Share the relevant timestamped lines, status, and the actual observed outcomes. Repeat with another player attacking the same target to test whether events can be attributed reliably.
+
+Times are relative to probe start; `combat=...` is relative to the most recent combat-entry event observed after starting the probe. Starting while already in combat does not establish a probe combat start time. Counters include events filtered out of the live trace, such as other units' casts. Probe results are not saved across reloads; alert settings are saved subject to Forever's SavedVariables limitation.
+
 ### Gathering Timer (`gather`)
 
 Starts two countdown bars (min and max respawn) when you loot a tracked ore or herb node. It is off by default and can be enabled in Options or with `/saboton gather enable`. Direct node-spawn detection is not possible on the Forever client (no game-object enumeration, no spawn event, no minimap-blip read), so it's timer-based: the loot of a tracked gatherable is the trigger. The min bar ("node may be up") and max bar ("gone / taken") are independent — each can be toggled off, has its own duration, and plays its own sound (bell chime and impact thud by default). The bar frame is movable (drag while unlocked, out of combat only), resizable, and can fill horizontally or vertically. Each gatherable (Thorium, Black Lotus, etc.) can be toggled on or off individually.
@@ -168,6 +188,14 @@ All commands go through `/saboton <module> <command>`.
 - `/saboton extraattack soundkey <none|kaching|squeak|huagh>` - set which sound plays; also available as a dropdown in Options
 - `/saboton extraattack minhits <1-10>` - minimum extra attacks in a burst for sound and text (default 1); also available as a slider in Options
 - `/saboton extraattack stagger <seconds>` - time between the sounds of a multi-hit burst (default 0.09s); also available as a slider in Options
+- `/saboton missalerts start` / `status` / `mark` / `stop` - run the session-only ability-outcome diagnostic described above
+- `/saboton missalerts enable` / `alertstatus` / `test` - toggle alerts, show settings, or preview the alert
+- `/saboton missalerts sound` / `text` - toggle the alert sound or animation
+- `/saboton missalerts soundkey <none|ding|thud|kaching|squeak|huagh>` - choose the alert sound
+- `/saboton missalerts xoffset <number>` / `yoffset <number>` - position the text arc; `/saboton missalerts movement <seconds>` / `fade <seconds>` - adjust its timing
+- `/saboton missalerts window <1-120>` - set the early-combat window in seconds; 120 means unlimited
+- `/saboton missalerts spells` / `add <name or ID>` / `remove <name or ID>` - list or change tracked spells; names match all ranks
+- `/saboton missalerts options` - open the tracked-spell manager
 - `/saboton gather status` - print the current state, active timer, and which gatherables are tracked
 - `/saboton gather test` - start short test bars (5s / 10s) without needing a node
 - `/saboton gather clear` - stop and hide the current timers
@@ -248,6 +276,14 @@ The guild-sync tests simulate multiple clients, restrictions, lost data/ACKs, th
 All fourteen Lua test suites passed with Fengari, including the mob timer and probe tests and the Tank Target suite's restricted threat formatting, secret-value matching, GUID/identity fallback, manual-pick, and enable/disable paths. The recovery tests verify bounded queue drainage and successful transfers under their simulated conditions, not guaranteed all-to-all convergence or real server throughput.
 
 ## Releases
+
+Version `0.7.0-beta.3` adds a grouped spell manager and configurable Miss Alerts sound and animation settings. In-game verification is still needed.
+
+Version `0.7.0-beta.2` renames Tank Helper to Miss Alerts and adds name-based spell management and an unlimited combat window. In-game verification is still needed.
+
+Version `0.7.0-beta.1` adds experimental timing-based Tank Helper alerts and keeps the diagnostic available. In-game verification is still needed.
+
+Version `0.7.0-beta` adds the session-only Tank Helper diagnostic for investigating ability outcomes on Forever. It does not yet provide automatic miss alerts.
 
 Version `0.6.0` includes the Mob Spawn Timer, minimap timer controls, and gathering celebrations from the 0.5.2 betas. Detection remains subject to the client limitations described above.
 
