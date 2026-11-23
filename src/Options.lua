@@ -47,6 +47,7 @@ local function createSlider(subcategory, moduleKey, spec)
 
     local sliderOptions = Settings.CreateSliderOptions(spec.min, spec.max, spec.step)
     sliderOptions:SetLabelFormatter(MinimalSliderWithSteppersMixin.Label.Right, function(value)
+        if spec.formatValue then return spec.formatValue(value) end
         return string.format(spec.format or "%.1f", value)
     end)
 
@@ -262,6 +263,7 @@ end
 local function createFallbackPanel()
     local panel = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
     local launchers = (addon.modules.spyenhancement and 1 or 0) + (addon.modules.mobtimer and 1 or 0)
+        + (addon.modules.tankhelper and 1 or 0)
     panel:SetSize(360, 290 + launchers * 45)
     panel:SetPoint("CENTER")
     panel:SetFrameStrata("DIALOG")
@@ -323,6 +325,14 @@ local function createFallbackPanel()
         mob:SetPoint("BOTTOM", 0, addon.modules.spyenhancement and 56 or 24)
         mob:SetText("Mob Spawn Timer: manage mobs")
         mob:SetScript("OnClick", function() addon.modules.mobtimer:ToggleEditor() end)
+    end
+    if addon.modules.tankhelper then
+        local miss = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        miss:SetSize(290, 24)
+        local offset = (addon.modules.spyenhancement and 32 or 0) + (addon.modules.mobtimer and 32 or 0)
+        miss:SetPoint("BOTTOM", 0, 24 + offset)
+        miss:SetText("Miss Alerts: manage spells")
+        miss:SetScript("OnClick", function() addon.modules.tankhelper:ToggleSpellEditor() end)
     end
     panel:SetScript("OnShow", function()
         for _, refresh in ipairs(refreshers) do refresh() end
@@ -406,7 +416,7 @@ local function buildModulePanel(rootCategory, moduleKey, schema)
                 Settings.CreateElementInitializer("SettingsListSectionHeaderTemplate", { name = section }))
         end
         for _, spec in ipairs(groups[section]) do
-            local build = optionBuilders[spec.type]
+            local build = not spec.hidden and optionBuilders[spec.type]
             if build then
                 local initializer = build(subcategory, moduleKey, spec)
                 if initializer and initializer.AddModifyPredicate then
@@ -422,8 +432,12 @@ local function buildModulePanel(rootCategory, moduleKey, schema)
                 end
             end
         end
+        if schema.action and schema.action.section == section then
+            Settings.RegisterInitializer(subcategory, CreateSettingsButtonInitializer(
+                schema.action.label, schema.action.button, schema.action.run, schema.action.tooltip, true))
+        end
     end
-    if schema.action then
+    if schema.action and not schema.action.section then
         Settings.RegisterInitializer(subcategory, CreateSettingsButtonInitializer(
             schema.action.label, schema.action.button, schema.action.run, schema.action.tooltip, true))
     end

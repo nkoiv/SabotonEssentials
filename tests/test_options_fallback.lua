@@ -5,6 +5,7 @@ local module
 local horizontal, vertical = 0, 0
 local movement, fade = 0.9, 0.5
 local mobOpened = false
+local spellOpened = false
 
 function CreateFrame(kind, ...)
     local frame = { kind = kind, scripts = {} }
@@ -50,6 +51,7 @@ end
 local addon = {
     modules = {
         mobtimer = { ToggleEditor = function() mobOpened = true end },
+        tankhelper = { ToggleSpellEditor = function() spellOpened = true end },
         extraattack = {
             GetOptionsSchema = function()
                 return { options = {
@@ -75,8 +77,10 @@ end
 assert(panel:IsShown() and #sliders == 4)
 for _, frame in ipairs(frames) do
     if frame.text == "Mob Spawn Timer: manage mobs" then frame.scripts.OnClick(frame) end
+    if frame.text == "Miss Alerts: manage spells" then frame.scripts.OnClick(frame) end
 end
 assert(mobOpened, "fallback options must open the mob editor")
+assert(spellOpened, "fallback options must open the spell editor")
 sliders[1]:SetValue(200)
 sliders[2]:SetValue(-100)
 assert(horizontal == 200 and vertical == -100)

@@ -18,6 +18,7 @@ function methods:StartMoving() self.moving = true end
 function methods:SetScript(name, callback) self.scripts[name] = callback end
 function methods:RegisterEvent(event) self.events[event] = true end
 function methods:UnregisterEvent(event) self.events[event] = nil end
+function methods:UnregisterAllEvents() self.events = {} end
 function methods:CreateTexture() return setmetatable({ scripts = {}, events = {} }, { __index = methods }) end
 function methods:CreateFontString() return setmetatable({ scripts = {}, events = {} }, { __index = methods }) end
 function CreateFrame()
@@ -88,7 +89,7 @@ local function session(saved)
     DEFAULT_CHAT_FRAME = { AddMessage = function(_, message) messages[#messages + 1] = message end }
     SabotonEssentialsDB = saved
     local addon = {}
-    for _, file in ipairs({ "src/Core.lua", "src/Support/TimerBars.lua", "src/Modules/SqueakyToy.lua", "src/Modules/ExtraAttack.lua", "src/Modules/GatheringTimer.lua", "src/Modules/MobTimer.lua", "src/Modules/TankTarget.lua", "src/Modules/MinimapButton.lua", "src/Support/GuildSync.lua", "src/Modules/SpyEnhancement.lua", "src/Options.lua" }) do
+    for _, file in ipairs({ "src/Core.lua", "src/Support/Spells.lua", "src/Support/TimerBars.lua", "src/Modules/SqueakyToy.lua", "src/Modules/ExtraAttack.lua", "src/Modules/GatheringTimer.lua", "src/Modules/MobTimer.lua", "src/Modules/TankTarget.lua", "src/Modules/TankHelper.lua", "src/Modules/MinimapButton.lua", "src/Support/GuildSync.lua", "src/Modules/SpyEnhancement.lua", "src/Options.lua" }) do
         assert(loadfile(file))("SabotonEssentials", addon)
     end
     fire("ADDON_LOADED", "SabotonEssentials")
@@ -103,6 +104,27 @@ local function said(fragment)
 end
 
 local addon = session(nil)
+slash("help")
+assert(said("  missalerts"), "help must show the new command")
+slash("missalerts start")
+assert(said("Miss Alerts probe: started"))
+assert(SabotonEssentialsDB.modules.tankhelper.enabled, "alert settings must be persisted")
+assert(SabotonEssentialsDB.modules.tankhelper.state == nil, "diagnostic state must not be persisted")
+slash("tankhelper stop")
+assert(said("Miss Alerts probe: stopped"), "old command remains an alias")
+slash("missalerts window 120")
+slash("tankhelper add 12345")
+slash("missalerts sound")
+slash("missalerts soundkey thud")
+slash("missalerts xoffset -300")
+slash("missalerts movement 2")
+C_Spell = {
+    GetSpellInfo = function(name) if name == "Mock Strike" then return { spellID = 9876 } end end,
+    GetSpellName = function(id) if id == 9876 or id == 9877 then return "Mock Strike" end end,
+}
+slash("missalerts add Mock Strike")
+assert(SabotonEssentialsDB.modules.tankhelper.spellFamilies == "9876")
+assert(SabotonEssentialsDB.modules.tankhelper.addSpell == nil, "action inputs must not be persisted")
 assert(not control("SPYENHANCEMENT", "SHAREKOSREASONS").get(), "upgrades must not enable reason sharing")
 control("SPYENHANCEMENT", "SHAREKOSREASONS").set(true)
 slash("gather enable")
@@ -153,6 +175,17 @@ assert(saved.modules.gather.state.position.x == 125 and saved.modules.gather.sta
 assert(math.abs(saved.modules.minimap.state.angle - 90) < 0.001)
 
 addon = session(saved)
+assert(control("TANKHELPER", "FIGHTWINDOW").get() == 120)
+assert(SabotonEssentialsDB.modules.tankhelper.spellList:find("12345", 1, true))
+assert(not control("TANKHELPER", "SOUNDENABLED").get())
+assert(control("TANKHELPER", "SOUNDKEY").get() == "thud")
+assert(control("TANKHELPER", "TEXTOFFSETX").get() == -300)
+assert(control("TANKHELPER", "TEXTARCDURATION").get() == 2)
+assert(SabotonEssentialsDB.modules.tankhelper.spellFamilies == "9876", "all-rank entry must survive reload")
+slash("missalerts spells")
+assert(said("Mock Strike (all ranks; ID 9876)"))
+slash("missalerts alertstatus")
+assert(said("Miss Alerts enabled; window Unlimited"), "unlimited setting must survive reload and be reported")
 assert(addon.modules.mobtimer:GetPersistentState().entries[1].name == "High Chief Winterfall")
 assert(addon.modules.mobtimer:GetPersistentState().entries[1].minSeconds == 3600)
 assert(control("MOBTIMER", "WIDTH").get() == 245)
@@ -283,7 +316,7 @@ for name, module in pairs(addon.modules) do
             elseif spec.type == "text" then
                 value = "Saved %d"
             end
-            if value ~= nil then
+            if value ~= nil and not spec.hidden and not spec.transient then
                 control(name:upper(), spec.key:upper()).set(value)
                 expected[name][spec.key] = spec.get()
             end
