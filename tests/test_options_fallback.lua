@@ -6,6 +6,8 @@ local horizontal, vertical = 0, 0
 local movement, fade = 0.9, 0.5
 local mobOpened = false
 local spellOpened = false
+local minimapShown, wowheadEnabled = true, false
+local saves = 0
 
 function CreateFrame(kind, ...)
     local frame = { kind = kind, scripts = {} }
@@ -14,6 +16,8 @@ function CreateFrame(kind, ...)
     function frame:SetFrameStrata(...) end
     function frame:SetBackdrop(...) end
     function frame:SetText(value) self.text = value end
+    function frame:SetChecked(value) self.checked = value end
+    function frame:GetChecked() return self.checked end
     function frame:EnableMouse(...) end
     function frame:Hide() self.shown = false end
     function frame:Show()
@@ -34,7 +38,7 @@ function CreateFrame(kind, ...)
     function frame:CreateFontString(...)
         local text = {}
         function text:SetPoint(...) end
-        function text:SetText(value) self.value = value end
+        function text:SetText(value) self.value = value frame.label = value end
         return text
     end
     function frame:CreateTexture(...)
@@ -50,6 +54,12 @@ end
 
 local addon = {
     modules = {
+        minimap = { GetOptionsSchema = function() return { options = {
+            { type = "checkbox", label = "Show minimap button", get = function() return minimapShown end, set = function(v) minimapShown = v end },
+        } } end },
+        wowhead = { GetOptionsSchema = function() return { options = {
+            { type = "checkbox", label = "Show Wowhead link in creature menus", get = function() return wowheadEnabled end, set = function(v) wowheadEnabled = v end },
+        } } end },
         mobtimer = { ToggleEditor = function() mobOpened = true end },
         tankhelper = { ToggleSpellEditor = function() spellOpened = true end },
         extraattack = {
@@ -64,6 +74,7 @@ local addon = {
         },
     },
     RegisterModule = function(_, value) module = value end,
+    SaveSettings = function() saves = saves + 1 end,
     Print = function() end,
 }
 assert(loadfile("src/Options.lua"))("SabotonEssentials", addon)
@@ -75,6 +86,18 @@ for _, frame in ipairs(frames) do
     if frame.kind == "Slider" then sliders[#sliders + 1] = frame end
 end
 assert(panel:IsShown() and #sliders == 4)
+local checkboxes = {}
+for _, frame in ipairs(frames) do
+    if frame.kind == "CheckButton" then checkboxes[frame.label] = frame end
+end
+local minimapCheck = assert(checkboxes["Show minimap button"])
+local wowheadCheck = assert(checkboxes["Show Wowhead link in creature menus"])
+assert(minimapCheck.checked and not wowheadCheck.checked)
+minimapCheck:SetChecked(false)
+minimapCheck.scripts.OnClick(minimapCheck)
+wowheadCheck:SetChecked(true)
+wowheadCheck.scripts.OnClick(wowheadCheck)
+assert(not minimapShown and wowheadEnabled and saves >= 2)
 for _, frame in ipairs(frames) do
     if frame.text == "Mob Spawn Timer: manage mobs" then frame.scripts.OnClick(frame) end
     if frame.text == "Miss Alerts: manage spells" then frame.scripts.OnClick(frame) end
@@ -93,4 +116,5 @@ horizontal, vertical = -150, 80
 module:HandleCommand()
 assert(panel:IsShown() and sliders[1].value == -150 and sliders[2].value == 80)
 assert(sliders[3].value == 1.5 and sliders[4].value == 0.8)
+assert(not minimapCheck.checked and wowheadCheck.checked)
 print("Fallback options tests passed")

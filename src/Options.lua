@@ -264,7 +264,17 @@ local function createFallbackPanel()
     local panel = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
     local launchers = (addon.modules.spyenhancement and 1 or 0) + (addon.modules.mobtimer and 1 or 0)
         + (addon.modules.tankhelper and 1 or 0)
-    panel:SetSize(360, 290 + launchers * 45)
+    local general = {}
+    for _, key in ipairs({ "minimap", "wowhead" }) do
+        local module = addon.modules[key]
+        if module and module.GetOptionsSchema then
+            for _, spec in ipairs(module:GetOptionsSchema().options or {}) do
+                if spec.type == "checkbox" and not spec.hidden then general[#general + 1] = spec end
+            end
+        end
+    end
+    local generalHeight = #general * 28
+    panel:SetSize(360, 290 + launchers * 45 + generalHeight)
     panel:SetPoint("CENTER")
     panel:SetFrameStrata("DIALOG")
     panel:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", edgeSize = 24, insets = { left = 6, right = 6, top = 6, bottom = 6 } })
@@ -273,23 +283,35 @@ local function createFallbackPanel()
 
     local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -20)
-    title:SetText("Extra Attack")
+    title:SetText("Saboton Essentials")
 
     local close = CreateFrame("Button", nil, panel, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -4, -4)
 
+    local refreshers = {}
+    for index, spec in ipairs(general) do
+        local check = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+        check:SetSize(26, 26)
+        check:SetPoint("TOPLEFT", 25, -40 - (index - 1) * 28)
+        local label = check:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+        label:SetPoint("LEFT", check, "RIGHT", 4, 0)
+        label:SetText(spec.label)
+        tooltip(check, spec.tooltip or spec.label)
+        check:SetScript("OnClick", function(self) saveOption(spec, self:GetChecked() == true) end)
+        refreshers[#refreshers + 1] = function() check:SetChecked(spec.get()) end
+    end
+
     local options = addon.modules.extraattack:GetOptionsSchema().options
     local row = 0
-    local refreshers = {}
     for _, spec in ipairs(options) do
         if spec.key == "textOffsetX" or spec.key == "textOffsetY" or spec.key == "textArcDuration" or spec.key == "textFadeDuration" then
             row = row + 1
             local label = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-            label:SetPoint("TOPLEFT", 30, -40 - row * 50)
+            label:SetPoint("TOPLEFT", 30, -40 - generalHeight - row * 50)
 
             local slider = CreateFrame("Slider", nil, panel)
             slider:SetSize(290, 16)
-            slider:SetPoint("TOPLEFT", 30, -57 - row * 50)
+            slider:SetPoint("TOPLEFT", 30, -57 - generalHeight - row * 50)
             slider:SetOrientation("HORIZONTAL")
             slider:SetMinMaxValues(spec.min, spec.max)
             slider:SetValueStep(spec.step)
@@ -397,9 +419,9 @@ end
 optionBuilders.text = createTextInput
 
 local function buildModulePanel(rootCategory, moduleKey, schema)
-    local subcategory = Settings.RegisterVerticalLayoutSubcategory(rootCategory, schema.name or moduleKey)
+    local subcategory = schema.root and rootCategory or Settings.RegisterVerticalLayoutSubcategory(rootCategory, schema.name or moduleKey)
     Options.moduleCategories = Options.moduleCategories or {}
-    Options.moduleCategories[moduleKey] = subcategory
+    if not schema.root then Options.moduleCategories[moduleKey] = subcategory end
     local specs, groups, order = {}, {}, {}
     for _, optionSpec in ipairs(schema.options or {}) do
         specs[optionSpec.key] = optionSpec

@@ -1,6 +1,6 @@
 # Saboton Essentials
 
-A World of Warcraft Forever / Classic+ addon for small, reactive audio and animation moments. Built as a collection of independent modules under a shared `/saboton` command, so new features can be added without touching existing ones.
+A modular World of Warcraft Forever addon with combat alerts, gathering and mob timers, tank-target nameplate marks, Spy enhancements, and creature links. Configure it through Options or `/saboton` commands.
 
 ## AI disclaimer
 
@@ -105,13 +105,13 @@ For older **untracked** imports, optionally check **Include suspected old import
 
 Player imports populate both Spy's KoS membership and the player metadata/KoS marker used by its menu, including its central character-sharing store when enabled. Beta.5 also repairs incomplete metadata left by earlier imports after settings restoration, or once local restrictions clear. This repair preserves existing metadata and KoS timestamps and does not restore names you removed. No fresh transfer is required for names already present and tracked as imports.
 
-All participants need the v4 implementation in beta.6 or later; old v2/v3 clients cannot participate, even for names-only sync. Exchanges use the guild addon channel, validate the guild roster and Spy list scope, and preserve Forever's `First-Surname` identities and ruleset-wide storage. No automatic login/change sync is implemented, and completion does not mean every guild member has converged. These are guild-channel messages, not encrypted private transfers.
+All participants need the v4 implementation introduced in `0.3.0-beta.6` or a later release; old v2/v3 clients cannot participate, even for names-only sync. Exchanges use the guild addon channel, validate the guild roster and Spy list scope, and preserve Forever's `First-Surname` identities and ruleset-wide storage. No automatic login/change sync is implemented, and completion does not mean every guild member has converged. These are guild-channel messages, not encrypted private transfers.
 
 Cyrillic analysis reports Ukrainian-compatible (Є, І, Ї, Ґ) and Russian-compatible (Ё, Ы, Э, Ъ) spelling indicators. These letters also occur in other languages: for example, І appears in Belarusian. Mixed indicators, shared Cyrillic letters and non-Cyrillic names are inconclusive. The results are not probabilities, evidence of nationality, or instructions to attack. To check a target, put `/saboton spyenhancement checkcyrillic` in a macro. It reports the first name, the surname when Forever's regional-name mode is enabled, and the currently available guild name separately; guild clues describe the guild, not necessarily the player. Restricted or unavailable data is reported rather than guessed. The command does not attack or alter Spy lists.
 
 #### Sync quick start and recovery
 
-1. Install Spy and Saboton Essentials beta.6 or later (v4 protocol) on both clients. Both characters must be in the same guild and use the same Spy ruleset/list scope.
+1. Install Spy and Saboton Essentials `0.3.0-beta.6` or a later release (v4 protocol) on both clients. Both characters must be in the same guild and use the same Spy ruleset/list scope.
 2. Open `/saboton spyenhancement options` on each client and leave **Enable guild sync** checked. This enables replies and imports as well as manual starts.
 3. Press **Sync Now on one client**. Either client can initiate, regardless of which has more entries; the exchange is bidirectional. Discovery normally takes at least 12 seconds after its first message is submitted, followed by paced transfers.
 4. Wait for a confirmed exchange. For example, 9 targets on one client and 1 already shared target on the other should leave both with 9, unless a missing name is locally suppressed.
@@ -137,13 +137,19 @@ For troubleshooting, enable `/saboton spyenhancement debug` on both clients **be
 
 ### Options (`options`)
 
-When Blizzard's Settings API is available, every module uses the same native controls under Game Menu > Options > AddOns > Saboton Essentials. Longer pages have short sections for related settings, and module categories have a stable alphabetical order. Dependent controls remain visible but gray out when their feature is off (for example text positioning without combo text, or threat colors without threat labels); their saved values are preserved. Without that API, `/saboton options` and the minimap button open a smaller panel with the four Extra Attack text position and timing sliders and a Spy Enhancement dashboard launcher; remaining settings use slash commands.
+When Blizzard's Settings API is available, configurable modules use native controls under Game Menu > Options > AddOns > Saboton Essentials. The main Saboton Essentials page contains the minimap button and Wowhead creature-menu toggles; other configurable modules have subpages. Dependent controls gray out when unavailable without losing their saved values. Without that API, `/saboton options` and the minimap button open a smaller panel with these two toggles, Extra Attack text sliders, and launchers for Spy sync, the mob timer, and the Miss Alerts spell manager; use slash commands for other settings.
 
 Spy Enhancement's Settings subcategory uses native sync, reason-sharing, and notification checkboxes with explanatory tooltips, just like the other modules. **Manage guild sync...** opens a separate live management window; routine **Sync Now** / **Cancel** actions are separated from **Import cleanup**. The window shows live state/list/import counts/requested-name progress, last confirmed exchange, **Remove imported KoS**, and a paged suppressed-name list with **Allow again** and **Allow all**. `/saboton spyenhancement options` or `/saboton options spyenhancement` opens Spy's Settings page. Without Settings support, those commands open the management window with preferences included; the shared fallback options also have a launcher. Allowing names does not immediately import them; run another sync. Progress is per active exchange, not a promise of guild-wide convergence.
 
 ### Minimap Button (`minimap`)
 
 A draggable minimap button (Thunder Clap icon) that opens Options on left-click. Right-click for **Unlock bar movement** or **Lock bar movement** and to add the current target to the mob timer. Unlocking affects both the Gathering and Mob timer frames, showing placeholders when they have no visible timers; drag each with the left mouse button outside combat. If their lock states differ, the menu offers to unlock both. Locking hides idle placeholders without stopping timers. The button can be dragged around the minimap and hidden via a checkbox in Options or `/saboton minimap`. If the client menu API is unavailable, the individual `/saboton gather lock` / `unlock` and `/saboton mobtimer lock` / `unlock` commands remain available.
+
+### Wowhead Creature Link (`wowhead`)
+
+Enable **Show Wowhead link in creature menus** on the main Saboton Essentials options page (off by default), then right-click a creature's target or focus portrait and choose **Copy Wowhead link**. The popup selects its WoW Forever NPC page address: press Ctrl+C, then paste it into your browser. The addon does not automatically copy the address or open a browser. `/saboton wowhead` shows the link for your current target even when the menu option is off or portrait menus are unavailable.
+
+The link uses the creature ID from its GUID; it does not import loot data. If a GUID is secret, unavailable, or unrecognized, the addon reports the reason. Wowhead may not have a page for every creature. The feature has been confirmed working in game; focus portraits, restricted GUIDs, and other client conditions have not all been independently verified.
 
 ## Installation
 
@@ -166,6 +172,7 @@ Settings, custom gatherables, and frame positions are stored in the account-wide
 All commands go through `/saboton <module> <command>`.
 
 - `/saboton help` - list available modules
+- `/saboton wowhead` - show a copyable Wowhead Forever link for the current creature target
 - `/saboton mobtimer options` - open the manual mob-timer editor
 - `/saboton mobprobe start` / `watch` / `status` / `stop` - run the experimental mob-death diagnostic described above
 - `/saboton squeak status` - print the current trigger and sound configuration
@@ -190,6 +197,7 @@ All commands go through `/saboton <module> <command>`.
 - `/saboton extraattack stagger <seconds>` - time between the sounds of a multi-hit burst (default 0.09s); also available as a slider in Options
 - `/saboton missalerts start` / `status` / `mark` / `stop` - run the session-only ability-outcome diagnostic described above
 - `/saboton missalerts enable` / `alertstatus` / `test` - toggle alerts, show settings, or preview the alert
+- `/saboton missalerts say` - toggle SAY chat announcements (off by default)
 - `/saboton missalerts sound` / `text` - toggle the alert sound or animation
 - `/saboton missalerts soundkey <none|ding|thud|kaching|squeak|huagh>` - choose the alert sound
 - `/saboton missalerts xoffset <number>` / `yoffset <number>` - position the text arc; `/saboton missalerts movement <seconds>` / `fade <seconds>` - adjust its timing
@@ -245,7 +253,7 @@ All commands go through `/saboton <module> <command>`.
 - Lua 5.1-compatible WoW addon code
 - `src\Core.lua` bootstraps the shared namespace, module registry, slash command dispatcher, and settings persistence.
 - Each feature lives in its own file under `src\Modules\` and self-registers via `addon.RegisterModule(name, module)`; a module implements `OnEnable()` (called once on `ADDON_LOADED`) and `HandleCommand(message)`
-- A module can optionally implement `GetOptionsSchema()` to appear in the settings panel (see `src\Options.lua`); this is the only integration point between modules and the UI
+- A module can optionally implement `GetOptionsSchema()` to appear in the settings panel; some modules also expose dedicated editor or dashboard methods.
 - A schema may provide a `dashboard` with view/actions and suppressed-entry callbacks. Options renders the same controls in a canvas Settings category or fallback window, keeping widget code out of feature modules. Refresh runs once per second only while the dashboard is visible.
 - Squeaky Toy uses the `UNIT_DIED` frame event (as of Patch 12.0.0/Midnight, addons can no longer register `COMBAT_LOG_EVENT_UNFILTERED`)
 - Spy Enhancement requires Spy for KoS/watch-list access; Spy is an optional load-order dependency so the other modules work without it. Sync uses native messaging and timers, not an incidental Ace library installation.
@@ -253,49 +261,25 @@ All commands go through `/saboton <module> <command>`.
 - `src\Support\GuildSync.lua` handles bounded, paced guild exchanges with provider callbacks. Each frame is at most 255 bytes; native sends are spaced by at least 1.25 seconds, with server-result backoff. Records up to 8,192 bytes use acknowledged continuation chunks; requested records are streamed one at a time. Snapshots are limited to 500 players and 500 guilds. Large reconciliations, particularly with reasons, can take many minutes; restrictions and server throttles can extend that time.
 - Discovery keeps up to 32 peers, coalesces repeated starts, and shares send opportunities with long transfers. Disconnected peers release their queues on roster updates, or after 3 minutes without progress if no disconnect event arrives. Local combat/chat pauses do not consume that timeout; a remotely restricted peer may need a later manual retry. Imported names survive interruption. This is best-effort per-peer reconciliation, not guaranteed all-to-all convergence in one guild-wide round.
 - Combat and active chat lockdown still pause sync. Forever's broad outgoing-restriction flag is not used as a preflight veto: native send results determine whether submission is allowed, and peer acknowledgments determine success.
-- Sync starts listening only after saved settings are restored. No network queue survives reload; imported-name suppression and confirmed-peer metadata do. The [implementation plan](docs/GUILD_SYNC_IMPLEMENTATION.md) documents the protocol, bounds, and remaining two-client Forever checks.
-- Uses `UnitGUID` to confirm the dead unit is in the current group for the friendly-mage trigger
-- The hostile/any-friendly testing triggers additionally scan target/focus/mouseover/nameplate/boss/arena unit tokens, since those deaths aren't limited to the group
-- Uses `UnitClass` to check the matched group member's configured class.
+- Sync starts listening only after saved settings are restored. No network queue survives reload; imported-name suppression and confirmed-peer metadata do, subject to the SavedVariables limitation above. The [sync implementation notes](docs/GUILD_SYNC_IMPLEMENTATION.md) document the protocol, bounds, and remaining live checks.
+- Squeaky Toy matches readable death GUIDs against group members and checks their class; the broader test triggers also scan target, focus, mouseover, nameplate, boss, and arena tokens.
 - Extra Attack cannot use combat log events (addons can no longer register `COMBAT_LOG_EVENT_UNFILTERED`). Its previously tested `COMBAT_TEXT_UPDATE` fallback did not fire for real procs on the tested Forever client and has been removed.
 - The legacy `PLAYER_SWING(swingDuration, swingType)` detector catches extra attacks such as Hand of Justice and Ironfoe: an extra attack lands as a main-hand swing far earlier than the current swing duration allows. A threshold under 50% of the expected interval excludes parry-haste false positives; swing duration is learned from the event itself so haste/Flurry are tracked without touching `UnitAttackSpeed` (secret in combat). Windfury Totem (each rank procs its own spell: 8516/10608/10610 for Ranks 1-3) and Windfury Weapon (rank spells 8232/8235/10486/16362 plus proc spell 439440) are detected separately from their `SPELL_UPDATE_COOLDOWN` events; Weapon counts as two hits. With the experimental option, off by default, Seal of Command proc spell 20424 cooldown updates count as one hit each; activation spell IDs are not counted.
 - Gathering Timer reads loot slots on `LOOT_READY`/`LOOT_OPENED`. When a readable source GUID is available, non-`GameObject` sources are rejected; otherwise the item match is used. Reopening a node restarts the timer, so the final pick wins.
-- Gathering Timer uses `C_Timer` and StatusBar frames; dragging is gated on `InCombatLockdown()`.
 - Tank Target wraps every unit API in `pcall` and treats secret values as unreadable: it prefers nameplate-frame identity comparisons (no values read), falls back to GUIDs, and passes secret `UnitIsUnit` booleans to `SetAlphaFromBoolean` so visibility is decided by the game. Mark frames are version-tagged, parented to the plate (not `plate.UnitFrame`), and anchored to a probed visible health bar (known addon fields, then a depth-limited child scan for the widest visible StatusBar). Updates run on target/roster/nameplate events plus a 0.25 s ticker, since tanks swap targets faster than events alone capture. The shield uses the `groupfinder-icon-role-large-tank` atlas with role-icon fallbacks. The design follows ScryWoW's tank-target feature (see credit in the module).
-- `src\Options.lua` builds the shared settings panel using Blizzard's `Settings` API (`Settings.RegisterVerticalLayoutCategory`/`Settings.RegisterProxySetting`/`Settings.CreateCheckbox`/`Settings.CreateSlider`/`Settings.CreateDropdown`); it reads a `GetOptionsSchema()` method from any module that implements one and never touches module internals directly, keeping UI code separate from feature logic
-- The vertical-list Settings API has no built-in free-text control, so a schema option of `type = "text"` is rendered via a small custom row template (`SabotonTextInputControlTemplate` in `src\Options.xml`), styled and positioned like the built-in checkbox/slider/dropdown rows, backed by `SabotonTextInputControlMixin` in `src\Options.lua`
-- Where Blizzard's `Settings` API is unavailable, the Options command opens a small window for the combo-text position and timing sliders, plus a Spy dashboard launcher. The Spy dashboard also opens directly via its options command; use slash commands for remaining settings.
-- The minimap button repositions itself by tracking cursor angle around the `Minimap` frame during drag (the common community pattern also used by libraries like LibDBIcon); left-click opens Options without touching the `Settings` API itself, and right-click opens the timer controls.
+- `src\Options.lua` builds native Settings controls from module schemas. Text options use `SabotonTextInputControlTemplate` in `src\Options.xml`; dedicated editors and the fallback panel use separate frames.
 
 ## Tests
 
-Run the Lua files in `tests/` from the addon root with a Lua interpreter. They use mocked WoW APIs and do not replace in-game testing. For example, with Node.js available, run `npx --yes --package fengari-node-cli fengari tests/test_gathering_timer.lua`.
+Run the `tests/test_*.lua` files from the addon root with Lua 5.1. They use mocked WoW APIs and do not replace in-game testing. With Node.js available, an individual suite can also be run with `npx --yes --package fengari-node-cli fengari tests/test_wowhead_link.lua`.
 
 The guild-sync tests simulate multiple clients, restrictions, lost data/ACKs, throttling, concurrent initiators, invalid records, and transfer limits. Run `tests/test_guild_sync.lua` for the transport, `tests/test_guild_sync_recovery.lua` for twenty-client bursts, disconnects/reconnects and exact idle-timeout boundaries, `tests/test_spy_enhancement.lua` for the Spy adapter, and `tests/test_spy_options.lua` for modern/fallback dashboard controls, alongside the persistence/core tests. Basic two-client transfers were confirmed in-game on beta.3; twenty-client load, Forever sender/receiver combat, roster behavior, and visual layout still require in-game validation before release.
 
-All fourteen Lua test suites passed with Fengari, including the mob timer and probe tests and the Tank Target suite's restricted threat formatting, secret-value matching, GUID/identity fallback, manual-pick, and enable/disable paths. The recovery tests verify bounded queue drainage and successful transfers under their simulated conditions, not guaranteed all-to-all convergence or real server throughput.
+The recovery tests verify bounded queue drainage and successful transfers under simulated conditions, not guaranteed all-to-all convergence or real server throughput.
 
 ## Releases
 
-Version `0.7.0-beta.3` adds a grouped spell manager and configurable Miss Alerts sound and animation settings. In-game verification is still needed.
-
-Version `0.7.0-beta.2` renames Tank Helper to Miss Alerts and adds name-based spell management and an unlimited combat window. In-game verification is still needed.
-
-Version `0.7.0-beta.1` adds experimental timing-based Tank Helper alerts and keeps the diagnostic available. In-game verification is still needed.
-
-Version `0.7.0-beta` adds the session-only Tank Helper diagnostic for investigating ability outcomes on Forever. It does not yet provide automatic miss alerts.
-
-Version `0.6.0` includes the Mob Spawn Timer, minimap timer controls, and gathering celebrations from the 0.5.2 betas. Detection remains subject to the client limitations described above.
-
-Version `0.5.2-beta.3` adds minimap timer controls, current-target mob tracking, and an opaque mob editor background.
-
-Version `0.5.2-beta.2` adds the experimental Mob Spawn Timer, including automatic death detection and manual previews; in-game validation is still required.
-
-Version `0.5.2-beta.1` adds the experimental mob death probe for in-game testing. It retains the gathering changes from `0.5.2-beta`.
-
-Version `0.5.2-beta` adds per-item gathering celebrations and updates the built-in respawn timer list. The visual effect and self-loot confirmation still need in-game testing on Forever.
-
-Version `0.5.1` includes the `0.5.0-beta` changes below and fixes a Tank Target chat error on Forever: restricted threat percentages are displayed in neutral white without using a color curve.
+See the [changelog](CHANGELOG.md) for version history. Existing ZIPs are snapshots and do not change when source or documentation changes.
 
 To create a ZIP locally on Windows for manual CurseForge upload, run from the addon root:
 
@@ -304,8 +288,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\package-release.ps1
 ```
 
 The script reads the TOC version and writes `releases\SabotonEssentials-<version>.zip`. The `releases` directory is ignored by Git. It packages the current working files, including uncommitted changes, and refuses to overwrite an existing ZIP; move or remove that ZIP to rebuild the same version. Run the tests and check the addon in-game before uploading.
-
-The `0.5.0-beta` package refreshes the settings UI with consistent native controls, grouped sections, and dependent controls that gray out without changing saved preferences. Spy's live sync management opens separately from its preferences, with import cleanup separated from routine sync. Tank Target adds an optional grouped-tank guessing toggle and limits threat labels to living, attackable units. It includes the session-only `/saboton tanktarget testshields` rendering diagnostic and saved, off-by-default all-nameplate threat option (`/saboton tanktarget allthreat`), querying each mob independently. Non-current tank-target shields inside instances remain under investigation; forced TEST shields bypass matching and filtering for diagnosis. Restricted multi-tank matches retain separate native-visibility shield-and-initial rows, which may leave gaps; readable matches retain comma-separated dotted initials. It retains previous Extra Attack, Spy, threat-display, and self-tank shield improvements, plus the v4 sync protocol; earlier v2/v3 clients must update. Existing archives are not updated when source or documentation changes. The UI refresh, restricted combat rendering, and large-group sync still require in-game testing.
 
 Releases use the [BigWigs WoW Packager](https://github.com/BigWigsMods/packager). It builds a ZIP containing the `SabotonEssentials` addon directory, detects Forever from interface `16001`, and generates release notes from Git history. Tests and original media sources are excluded from the ZIP.
 

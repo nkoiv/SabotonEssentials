@@ -1,5 +1,14 @@
 # Saboton Essentials - Changelog
 
+## [0.7.2-beta.1] - 2026-11-27
+
+- Move the minimap button toggle to the main options page and add a Wowhead creature-menu toggle there, off by default. Both are also available in fallback options.
+- Refresh the documentation and remove duplicated release history.
+
+## [0.7.2-beta] - 2026-11-27
+
+- Add a copyable Wowhead Forever creature link to target and focus portrait menus, with `/saboton wowhead` as a target fallback. Confirmed working in game; other client conditions remain to be tested.
+
 ## [0.7.1] - 2026-11-23
 
 - Add an opt-in Miss Alerts option to announce the ability and miss outcome in SAY chat, creating an overhead speech bubble. The test preview does not send chat messages.

@@ -1,33 +1,16 @@
 # Guild sync implementation
 
-## Current validation and release status
+## Validation status
 
-- `0.3.0-beta.3`: basic two-client transfer confirmed in-game after normalizing
-  space-separated guild-message sender names to Spy's hyphenated identities.
-- `0.3.0-beta.4`: burst/disconnect hardening packaged for testing, with all ten
-  Lua suites passing with Fengari. Earlier beta ZIPs do not include this work.
-- `0.3.0-beta.5`: complete Spy player-metadata insertion and repair of earlier
-  tracked imports. Earlier transfer confirmations only verified KoS membership,
-  not visibility in Spy's menu; the metadata fix still needs in-game validation.
-- `0.3.0-beta.6`: opt-in player KoS reasons, local-wins reason collisions,
-  content fingerprints, and bounded continuation chunks over incompatible v4.
-  Update both clients; reason transfer still needs in-game validation.
-- `0.3.1`: tracked-import cleanup, opt-in suspected legacy cleanup, Guild-labeled
-  native reason display, and names-only placeholders. All ten Lua suites pass,
-  including cleanup/reload and rendering tests; live verification remains pending.
-  Existing beta.6 ZIPs do not include these changes. The v4 protocol is unchanged.
-- `0.3.2-beta`: track each Windfury Totem and Windfury Weapon rank spell for
-  extra-attack sounds, and add opt-in experimental Seal of Command proc detection.
-- `0.3.2-beta.2`: add **Allow all** to clear player and guild import suppressions
-  in one action. Allowed names remain absent until the next sync.
-- Still unverified in-game: twenty-client load, restriction transitions,
-  disconnect/reconnect recovery, and modern/fallback dashboard layout.
-- Windfury rank spell IDs still require in-game proc verification. Seal of
-  Command proc spell 20424 was observed in a cooldown event in-game; detection
-  remains experimental and disabled by default. Whether other Seal ranks use
-  20424 or different proc IDs on Forever remains unverified.
-- User-facing setup, status meanings, and diagnostic steps are in the
-  [README sync guide](../README.md#sync-quick-start-and-recovery).
+Basic two-client KoS membership transfer was confirmed in-game on
+`0.3.0-beta.3`, after normalizing Forever sender names. That did not verify
+later metadata repair, reason sharing, cleanup, or reason rendering. The
+twenty-client load, restriction transitions, disconnect/reconnect recovery,
+and modern/fallback dashboard layout also still require live testing.
+
+All participants need the v4 protocol introduced in `0.3.0-beta.6` or later.
+See the [README sync guide](../README.md#sync-quick-start-and-recovery) for
+setup and troubleshooting, and the [changelog](../CHANGELOG.md) for release history.
 
 ## Scope and design
 
@@ -247,10 +230,9 @@ changes invalidate active work. A busy peer may be retried on the next sync.
 
 1. Implemented support engine and simulated multi-client network tests.
 2. Integrated Spy adapter, persistence/suppression, lifecycle, TOC and commands.
-3. Updated README/changelog and implemented the shared options dashboard. All
-   ten Lua suites passed with Fengari, including modern/fallback UI and saved
-   settings, a 1,000-record transfer, and maximum frame/routing/record byte-length
-   cases.
+3. Updated README/changelog and implemented the shared options dashboard. Mock
+   tests cover modern/fallback UI and saved settings, a 1,000-record transfer,
+   and maximum frame/routing/record byte-length cases.
 4. Basic two-client transfers were confirmed in-game on beta.3 after fixing
    Forever's space-separated chat sender identities. Still pending in-game:
    - twenty concurrent starts and repeated clicks with normal addon traffic;

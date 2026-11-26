@@ -95,6 +95,7 @@ end
 function MinimapButton:GetOptionsSchema()
     return {
         name = "Minimap Button",
+        root = true,
         options = {
             {
                 type = "checkbox",

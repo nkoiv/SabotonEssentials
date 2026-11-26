@@ -4,11 +4,12 @@ function addon.RegisterModule(key, module) addon.modules[key] = module end
 assert(loadfile("src/Support/Spells.lua"))("SabotonEssentials", addon)
 assert(loadfile("src/Support/TimerBars.lua"))("SabotonEssentials", addon)
 LOCALIZED_CLASS_NAMES_MALE = {}
-for _, name in ipairs({ "ExtraAttack", "GatheringTimer", "MobTimer", "TankTarget", "TankHelper", "SqueakyToy", "SpyEnhancement", "MinimapButton" }) do
+for _, name in ipairs({ "ExtraAttack", "GatheringTimer", "MobTimer", "TankTarget", "TankHelper", "SqueakyToy", "SpyEnhancement", "MinimapButton", "WowheadLink" }) do
     assert(loadfile("src/Modules/" .. name .. ".lua"))("SabotonEssentials", addon)
 end
 
 local schemas, values, controls, categories, categoryOrder = {}, {}, {}, {}, {}
+local rootCategory = { rows = {} }
 local writes = 0
 for key, module in pairs(addon.modules) do
     local schema = module:GetOptionsSchema()
@@ -39,7 +40,7 @@ local function register(category, item)
 end
 Settings = {
     VarType = { Boolean = "boolean", Number = "number", String = "string" },
-    RegisterVerticalLayoutCategory = function() return { rows = {} } end,
+    RegisterVerticalLayoutCategory = function() return rootCategory end,
     RegisterVerticalLayoutSubcategory = function(_, name)
         local category = { name = name, rows = {} }
         categories[name] = category
@@ -75,8 +76,15 @@ function CreateFromMixins() return {} end
 assert(loadfile("src/Options.lua"))("SabotonEssentials", addon)
 addon.modules.options:OnEnable()
 assert(writes == 0, "building the UI must not change any saved preferences")
-assert(table.concat(categoryOrder, ",") == "Extra Attack,Gathering Timer,Minimap Button,Mob Spawn Timer,Spy Enhancement,Squeaky Toy,Miss Alerts,Tank Target",
+assert(table.concat(categoryOrder, ",") == "Extra Attack,Gathering Timer,Mob Spawn Timer,Spy Enhancement,Squeaky Toy,Miss Alerts,Tank Target",
     "module categories must have a stable order")
+assert(not categories["Minimap Button"] and not categories["Wowhead Creature Link"])
+assert(#rootCategory.rows == 2, "general settings belong on the root category")
+assert(controls.SABOTONESSENTIALS_MINIMAP_SHOWBUTTON.data.setting.default == true)
+assert(controls.SABOTONESSENTIALS_WOWHEAD_MENUENABLED.data.setting.default == false)
+controls.SABOTONESSENTIALS_MINIMAP_SHOWBUTTON.data.setting.set(false)
+controls.SABOTONESSENTIALS_WOWHEAD_MENUENABLED.data.setting.set(true)
+assert(not values.minimap.showButton and values.wowhead.menuEnabled)
 local foundMobAction = false
 for _, row in ipairs(categories["Mob Spawn Timer"].rows) do
     if row.template == "button" and row.data.buttonText == "Manage mobs..." then foundMobAction = true end
@@ -90,7 +98,7 @@ assert(foundSpellAction, "spell management must be reachable in native settings"
 assert(not controls["SABOTONESSENTIALS_TANKHELPER_SPELLLIST"], "raw IDs must not be shown in settings")
 for key, schema in pairs(schemas) do
     local section, seen, count = nil, {}, 0
-    for _, row in ipairs(categories[schema.name].rows) do
+    for _, row in ipairs(schema.root and {} or categories[schema.name].rows) do
         if row.template == "SettingsListSectionHeaderTemplate" then
             section = row.data.name
             assert(not seen[section], "sections must be contiguous, not repeated")
@@ -106,7 +114,7 @@ for key, schema in pairs(schemas) do
     end
     local visible = 0
     for _, spec in ipairs(schema.options) do if not spec.hidden then visible = visible + 1 end end
-    assert(count == visible, "each visible option must appear exactly once")
+    if not schema.root then assert(count == visible, "each visible option must appear exactly once") end
 end
 local function control(module, key)
     return assert(controls["SABOTONESSENTIALS_" .. module:upper() .. "_" .. key:upper()])
@@ -151,5 +159,5 @@ function textControl:DisplayEnabled(enabled) self.labelEnabled = enabled end
 SabotonTextInputControlMixin.EvaluateState(textControl)
 assert(textControl.EditBox.enabled == false and textControl.labelEnabled == false,
     "disabled text controls must disable the actual edit box as well as its label")
-assert(writes == 0)
+assert(writes == 2, "only the two explicit root-setting changes may write preferences")
 print("Shared options layout and dependency tests passed")
