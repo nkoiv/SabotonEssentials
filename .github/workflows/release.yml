@@ -75,6 +75,7 @@ jobs:
           name: SabotonEssentials-${{ github.ref_name }}
           path: .release/*.zip
           if-no-files-found: error
+          include-hidden-files: true
 
       - name: Publish GitHub release
         env:
