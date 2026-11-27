@@ -6,7 +6,7 @@ local horizontal, vertical = 0, 0
 local movement, fade = 0.9, 0.5
 local mobOpened = false
 local spellOpened = false
-local minimapShown, wowheadEnabled = true, false
+local minimapShown, wowheadEnabled, chatTabsEnabled, chatInputHidden, chatCustomSize = true, false, false, false, false
 local saves = 0
 
 function CreateFrame(kind, ...)
@@ -54,6 +54,11 @@ end
 
 local addon = {
     modules = {
+        chattabs = { GetOptionsSchema = function() return { options = {
+            { type = "checkbox", label = "Hide chat tabs until hovered", get = function() return chatTabsEnabled end, set = function(v) chatTabsEnabled = v end },
+            { type = "checkbox", label = "Hide chat input box until typing", get = function() return chatInputHidden end, set = function(v) chatInputHidden = v end },
+            { type = "checkbox", label = "Use custom chat message font size", get = function() return chatCustomSize end, set = function(v) chatCustomSize = v end },
+        } } end },
         minimap = { GetOptionsSchema = function() return { options = {
             { type = "checkbox", label = "Show minimap button", get = function() return minimapShown end, set = function(v) minimapShown = v end },
         } } end },
@@ -92,12 +97,21 @@ for _, frame in ipairs(frames) do
 end
 local minimapCheck = assert(checkboxes["Show minimap button"])
 local wowheadCheck = assert(checkboxes["Show Wowhead link in creature menus"])
-assert(minimapCheck.checked and not wowheadCheck.checked)
+local chatTabsCheck = assert(checkboxes["Hide chat tabs until hovered"])
+local chatInputCheck = assert(checkboxes["Hide chat input box until typing"])
+local sizeCheck = assert(checkboxes["Use custom chat message font size"])
+assert(minimapCheck.checked and not wowheadCheck.checked and not chatTabsCheck.checked and not chatInputCheck.checked and not sizeCheck.checked)
 minimapCheck:SetChecked(false)
 minimapCheck.scripts.OnClick(minimapCheck)
 wowheadCheck:SetChecked(true)
 wowheadCheck.scripts.OnClick(wowheadCheck)
-assert(not minimapShown and wowheadEnabled and saves >= 2)
+chatTabsCheck:SetChecked(false)
+chatTabsCheck.scripts.OnClick(chatTabsCheck)
+chatInputCheck:SetChecked(true)
+chatInputCheck.scripts.OnClick(chatInputCheck)
+sizeCheck:SetChecked(true)
+sizeCheck.scripts.OnClick(sizeCheck)
+assert(not minimapShown and wowheadEnabled and not chatTabsEnabled and chatInputHidden and chatCustomSize and saves >= 5)
 for _, frame in ipairs(frames) do
     if frame.text == "Mob Spawn Timer: manage mobs" then frame.scripts.OnClick(frame) end
     if frame.text == "Miss Alerts: manage spells" then frame.scripts.OnClick(frame) end
@@ -116,5 +130,5 @@ horizontal, vertical = -150, 80
 module:HandleCommand()
 assert(panel:IsShown() and sliders[1].value == -150 and sliders[2].value == 80)
 assert(sliders[3].value == 1.5 and sliders[4].value == 0.8)
-assert(not minimapCheck.checked and wowheadCheck.checked)
+assert(not minimapCheck.checked and wowheadCheck.checked and not chatTabsCheck.checked and chatInputCheck.checked and sizeCheck.checked)
 print("Fallback options tests passed")

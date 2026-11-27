@@ -265,7 +265,7 @@ local function createFallbackPanel()
     local launchers = (addon.modules.spyenhancement and 1 or 0) + (addon.modules.mobtimer and 1 or 0)
         + (addon.modules.tankhelper and 1 or 0)
     local general = {}
-    for _, key in ipairs({ "minimap", "wowhead" }) do
+    for _, key in ipairs({ "chattabs", "minimap", "wowhead" }) do
         local module = addon.modules[key]
         if module and module.GetOptionsSchema then
             for _, spec in ipairs(module:GetOptionsSchema().options or {}) do

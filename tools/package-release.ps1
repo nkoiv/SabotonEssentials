@@ -18,7 +18,8 @@ foreach ($line in $tocLines) {
     }
 }
 
-$runtimeFiles = @('SabotonEssentials.toc', 'LICENSE', 'README.md')
+$runtimeFiles = @('SabotonEssentials.toc', 'LICENSE', 'README.md', 'CHANGELOG.md')
+$runtimeFiles += @(Get-ChildItem -LiteralPath (Join-Path $root 'docs') -File -Recurse | ForEach-Object { $_.FullName.Substring($root.Length + 1) })
 $runtimeFiles += @(Get-ChildItem -LiteralPath (Join-Path $root 'src') -File -Recurse | ForEach-Object { $_.FullName.Substring($root.Length + 1) })
 $runtimeFiles += @(Get-ChildItem -LiteralPath (Join-Path $root 'Media') -File | Where-Object { -not $_.Name.StartsWith('.') } | ForEach-Object { $_.FullName.Substring($root.Length + 1) })
 foreach ($sound in @('squeak.mp3', 'kaching.mp3', 'HumanMaleAggroA.ogg', 'clear-bell-chime.mp3', 'impact-thud.mp3')) {
