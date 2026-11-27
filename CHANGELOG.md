@@ -1,5 +1,9 @@
 # Saboton Essentials - Changelog
 
+## [0.8.1] - 2026-11-27
+
+- Remove a byte-order mark from Gathering Timer that prevented loading under standard Lua 5.1 and blocked release validation.
+
 ## [0.8.0] - 2026-11-27
 
 - Add Chat Tabs settings for opt-in tab hover hiding, hiding the input box when not focused, and choosing the chat message font and size.
