@@ -260,10 +260,91 @@ function Options:ToggleSpyDashboard()
     if self.spyWindow:IsShown() then self.spyWindow:Hide() else self.spyWindow:Show() end
 end
 
+local function createSchemaWindow(schema)
+    local panel = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
+    panel:SetPoint("CENTER")
+    panel:SetFrameStrata("DIALOG")
+    panel:SetClampedToScreen(true)
+    panel:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+        edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", edgeSize = 24,
+        insets = { left = 6, right = 6, top = 6, bottom = 6 } })
+    panel:EnableMouse(true)
+    local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    title:SetPoint("TOP", 0, -20)
+    title:SetText(schema.name)
+    local close = CreateFrame("Button", nil, panel, "UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT", -4, -4)
+    local controls, specs, y = {}, {}, 55
+    for _, spec in ipairs(schema.options or {}) do specs[spec.key] = spec end
+    for _, spec in ipairs(schema.options or {}) do
+        if not spec.hidden then
+            local control, label
+            if spec.type == "checkbox" then
+                control = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+                control:SetSize(26, 26)
+                control:SetPoint("TOPLEFT", 25, -y)
+                label = control:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+                label:SetPoint("LEFT", control, "RIGHT", 4, 0)
+                label:SetText(spec.label)
+                control:SetScript("OnClick", function(self)
+                    saveOption(spec, self:GetChecked() == true)
+                    panel:Refresh()
+                end)
+                y = y + 30
+            elseif spec.type == "slider" then
+                label = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+                label:SetPoint("TOPLEFT", 30, -y)
+                control = CreateFrame("Slider", nil, panel)
+                control:SetSize(340, 16)
+                control:SetPoint("TOPLEFT", 30, -y - 22)
+                control:SetOrientation("HORIZONTAL")
+                control:SetMinMaxValues(spec.min, spec.max)
+                control:SetValueStep(spec.step)
+                control:SetObeyStepOnDrag(true)
+                control:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
+                local track = control:CreateTexture(nil, "BACKGROUND")
+                track:SetPoint("LEFT")
+                track:SetPoint("RIGHT")
+                track:SetHeight(3)
+                track:SetColorTexture(0.45, 0.45, 0.45, 1)
+                control:SetScript("OnValueChanged", function(_, value)
+                    if not panel.refreshing then saveOption(spec, value) panel:Refresh() end
+                end)
+                y = y + 60
+            else
+                addon.Print("Fallback options: unsupported control for " .. spec.label .. ".")
+            end
+            if control then
+                tooltip(control, spec.tooltip or spec.label)
+                controls[#controls + 1] = { control = control, label = label, spec = spec }
+            end
+        end
+    end
+    panel:SetSize(410, y + 25)
+    function panel:Refresh()
+        self.refreshing = true
+        for _, entry in ipairs(controls) do
+            local spec, control = entry.spec, entry.control
+            local master = not schema.enabledKey or spec.key == schema.enabledKey or specs[schema.enabledKey].get()
+            control:SetEnabled(master and (not spec.dependsOn or specs[spec.dependsOn].get()))
+            if spec.type == "checkbox" then control:SetChecked(spec.get())
+            else
+                control:SetValue(spec.get())
+                entry.label:SetText(spec.label .. ": " .. (spec.formatValue and spec.formatValue(spec.get())
+                    or string.format(spec.format or "%d", spec.get())))
+            end
+        end
+        self.refreshing = false
+    end
+    panel:Hide()
+    panel:SetScript("OnShow", function() panel:Refresh() end)
+    return panel
+end
+
 local function createFallbackPanel()
     local panel = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
     local launchers = (addon.modules.spyenhancement and 1 or 0) + (addon.modules.mobtimer and 1 or 0)
-        + (addon.modules.tankhelper and 1 or 0)
+        + (addon.modules.tankhelper and 1 or 0) + (addon.modules.partycooldowns and 1 or 0)
     local general = {}
     for _, key in ipairs({ "chattabs", "minimap", "wowhead" }) do
         local module = addon.modules[key]
@@ -301,7 +382,7 @@ local function createFallbackPanel()
         refreshers[#refreshers + 1] = function() check:SetChecked(spec.get()) end
     end
 
-    local options = addon.modules.extraattack:GetOptionsSchema().options
+    local options = addon.modules.extraattack and addon.modules.extraattack:GetOptionsSchema().options or {}
     local row = 0
     for _, spec in ipairs(options) do
         if spec.key == "textOffsetX" or spec.key == "textOffsetY" or spec.key == "textArcDuration" or spec.key == "textFadeDuration" then
@@ -355,6 +436,15 @@ local function createFallbackPanel()
         miss:SetPoint("BOTTOM", 0, 24 + offset)
         miss:SetText("Miss Alerts: manage spells")
         miss:SetScript("OnClick", function() addon.modules.tankhelper:ToggleSpellEditor() end)
+    end
+    if addon.modules.partycooldowns then
+        local cooldowns = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        cooldowns:SetSize(290, 24)
+        local offset = (addon.modules.spyenhancement and 32 or 0) + (addon.modules.mobtimer and 32 or 0)
+            + (addon.modules.tankhelper and 32 or 0)
+        cooldowns:SetPoint("BOTTOM", 0, 24 + offset)
+        cooldowns:SetText("Party Cooldowns: options")
+        cooldowns:SetScript("OnClick", function() Options:HandleCommand("partycooldowns") end)
     end
     panel:SetScript("OnShow", function()
         for _, refresh in ipairs(refreshers) do refresh() end
@@ -497,6 +587,17 @@ function Options:HandleCommand(message)
         local category = self.moduleCategories and self.moduleCategories.spyenhancement
         if category then Settings.OpenToCategory(category:GetID()) return end
         self:ToggleSpyDashboard()
+        return
+    end
+    if message == "partycooldowns" then
+        local module = addon.modules[message]
+        if not module then addon.Print("Party Cooldowns options are unavailable.") return end
+        local category = self.moduleCategories and self.moduleCategories[message]
+        if category then Settings.OpenToCategory(category:GetID()) return end
+        self.moduleWindows = self.moduleWindows or {}
+        local window = self.moduleWindows[message] or createSchemaWindow(module:GetOptionsSchema())
+        self.moduleWindows[message] = window
+        if window:IsShown() then window:Hide() else window:Show() end
         return
     end
     if not settingsAvailable then

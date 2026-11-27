@@ -90,7 +90,7 @@ local function session(saved)
     DEFAULT_CHAT_FRAME = { AddMessage = function(_, message) messages[#messages + 1] = message end }
     SabotonEssentialsDB = saved
     local addon = {}
-    for _, file in ipairs({ "src/Core.lua", "src/Support/Spells.lua", "src/Support/TimerBars.lua", "src/Modules/SqueakyToy.lua", "src/Modules/ExtraAttack.lua", "src/Modules/GatheringTimer.lua", "src/Modules/MobTimer.lua", "src/Modules/TankTarget.lua", "src/Modules/TankHelper.lua", "src/Modules/MinimapButton.lua", "src/Modules/WowheadLink.lua", "src/Modules/ChatTabs.lua", "src/Support/GuildSync.lua", "src/Modules/SpyEnhancement.lua", "src/Options.lua" }) do
+    for _, file in ipairs({ "src/Core.lua", "src/Support/Spells.lua", "src/Support/TimerBars.lua", "src/Support/PartyCooldowns.lua", "src/Support/CooldownSync.lua", "src/Modules/PartyCooldownTracker.lua", "src/Modules/SqueakyToy.lua", "src/Modules/ExtraAttack.lua", "src/Modules/GatheringTimer.lua", "src/Modules/MobTimer.lua", "src/Modules/TankTarget.lua", "src/Modules/TankHelper.lua", "src/Modules/MinimapButton.lua", "src/Modules/WowheadLink.lua", "src/Modules/ChatTabs.lua", "src/Support/GuildSync.lua", "src/Modules/SpyEnhancement.lua", "src/Options.lua" }) do
         assert(loadfile(file))("SabotonEssentials", addon)
     end
     fire("ADDON_LOADED", "SabotonEssentials")
@@ -104,10 +104,28 @@ local function said(fragment)
     return false
 end
 
+ChatFrame1 = {
+    size = 12,
+    writes = 0,
+    IsShown = function() return true end,
+    GetFont = function(self) return "Fonts\\CHAT.TTF", self.size, "" end,
+    SetFont = function(self, _, size) self.size = size self.writes = self.writes + 1 end,
+}
+session({ version = 1, modules = {
+    chattabs = { font = "default", customFontSize = false, fontSize = 14 },
+} })
+for _, frame in ipairs(frames) do
+    if frame.scripts.OnUpdate then frame.scripts.OnUpdate(frame, 0.1) end
+end
+assert(ChatFrame1.size == 12 and ChatFrame1.writes == 0,
+    "restoring disabled custom size must not change the client's chat font size")
+ChatFrame1 = nil
+
 local addon = session({ version = 1, modules = { minimap = { showButton = false } } })
 assert(not control("MINIMAP", "SHOWBUTTON").get(), "existing minimap preference must restore")
 assert(not control("WOWHEAD", "MENUENABLED").get(), "upgrades must default the Wowhead menu off")
 assert(not control("CHATTABS", "ENABLED").get(), "chat-tab hiding must be disabled by default")
+assert(not control("CHATTABS", "HIDEBUTTONS").get(), "chat-button hiding must be disabled by default")
 assert(control("CHATTABS", "FONT").get() == "default", "chat tabs must preserve their default font")
 assert(not control("CHATTABS", "CUSTOMFONTSIZE").get(), "chat message size override defaults off")
 addon = session(nil)
@@ -157,6 +175,7 @@ control("MINIMAP", "SHOWBUTTON").set(false)
 control("WOWHEAD", "MENUENABLED").set(true)
 control("CHATTABS", "ENABLED").set(false)
 control("CHATTABS", "HIDEINPUT").set(true)
+control("CHATTABS", "HIDEBUTTONS").set(true)
 control("CHATTABS", "FONT").set("arial")
 control("CHATTABS", "FONTSIZE").set(16)
 control("CHATTABS", "CUSTOMFONTSIZE").set(true)
@@ -226,6 +245,7 @@ assert(not control("MINIMAP", "SHOWBUTTON").get())
 assert(control("WOWHEAD", "MENUENABLED").get(), "Wowhead menu preference must survive reload")
 assert(not control("CHATTABS", "ENABLED").get(), "chat tab preference must survive reload")
 assert(control("CHATTABS", "HIDEINPUT").get(), "chat input preference must survive reload")
+assert(control("CHATTABS", "HIDEBUTTONS").get(), "chat button preference must survive reload")
 assert(control("CHATTABS", "FONT").get() == "arial" and control("CHATTABS", "FONTSIZE").get() == 16,
     "chat tab font preferences must survive reload")
 assert(control("CHATTABS", "CUSTOMFONTSIZE").get(), "chat message size override survives reload")

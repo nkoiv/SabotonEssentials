@@ -1,12 +1,44 @@
 # Saboton Essentials
 
-A modular World of Warcraft Forever addon with combat alerts, gathering and mob timers, chat-tab visibility, tank-target nameplate marks, Spy enhancements, and creature links. Configure it through Options or `/saboton` commands.
+A modular World of Warcraft Forever addon with party cooldown tracking, combat alerts, gathering and mob timers, chat-tab visibility, tank-target nameplate marks, Spy enhancements, and creature links. Configure it through Options or `/saboton` commands.
 
 ## AI disclaimer
 
 Generative AI was heavily utilized in creation of this mod and the modules below.
 
 ## Modules
+
+### Party Cooldowns (`partycooldowns`) - beta
+
+An opt-in movable window for **Innervate, Rebirth and Lay on Hands**, in parties and raids up to 40 members. Enable it in Options or with `/saboton partycooldowns enable`. Settings include per-ability visibility, including your character, sharing, window width/row height, and position locking. Unlock and drag the window's header to move it out of combat. Larger groups are paged in sets of 12 rows using the header's arrow buttons. These controls use the existing shared Options framework, including its fallback UI.
+
+Each enabled reporting player must run SabotonEssentials with this module and sharing enabled. Sharing is on by default **within the disabled-by-default module**. It reports all three presets of the player's class even if an ability's display checkbox is off. Members without the module can only be estimated from readable group cast events; Forever may hide those events in combat, and range or missed events can prevent detection. No combat log is registered.
+
+- **Reported ready** (green): a recent readable cooldown query from your client or a group member's client. It is a last-observed state, not a guarantee that the spell remains usable.
+- **Countdown** (blue): a recent readable cooldown report. The sender's actual remaining time and duration are preserved rather than clamped to your base-cooldown preset.
+- **`~` countdown** (amber): a base-duration cast estimate, restored timer, or report at least 180 seconds old.
+- **Unknown** (gray): no usable current readiness evidence, an explicit unknown report, or a countdown that expired. Expiry never automatically becomes Ready. Ready/known-spell reports expire after 180 seconds, and entering combat or a messaging restriction clears earlier remote-ready claims.
+- **Offline / Dead**: readable roster availability overrides the row label. A recent report that the player does not know an ability hides that row until the report expires.
+
+Hover a row for its source and observation age. Readable own cooldowns are polled every 0.5 seconds, respecting cooldown rate and ignoring GCD-only results. A short cast grace period handles delayed cooldown updates; restricted reads preserve active countdowns. The first beta uses base-duration estimates for observed casts, not talent-adjusted guesses.
+
+The module sends full class snapshots on the `SECD1` prefix to PARTY, RAID or INSTANCE_CHAT, on state changes, every 60 seconds, and after a group-state request. Native sends are paced at least 1.25 seconds apart; blocked/throttled submissions retry after 5 seconds with remaining time recomputed. Incoming reports must resolve to an unambiguous current group member and match that member's class. Payloads are bounded to 255 bytes and validated atomically. Submission success does not confirm delivery. Chat restrictions may block live combat tracking even when everyone has the module; broad outgoing-restriction flags are not used as a veto. This protocol does not interoperate with standalone ForeverCDs.
+
+Running timers are saved on observed casts, received snapshots, own-state changes and logout, then restored using wall-clock expiry **as estimates**. Settings use the normal module persistence hooks; unchanged polling does not repeatedly serialize other modules. Forever may not load SavedVariables after relog; this module cannot guarantee persistence and does not add a macro mirror. Preview/debug state and network queues are session-only.
+
+Commands:
+
+- `/saboton partycooldowns enable|disable` - set the module state.
+- `/saboton partycooldowns status` - show tracked states, fresh reporting peers, restrictions and event/message counters.
+- `/saboton partycooldowns options` - open the module's Settings category or its schema-driven fallback window.
+- `/saboton partycooldowns sync on|off|status` - configure/report group sharing; off also stops receiving reports.
+- `/saboton partycooldowns lock|unlock` - lock/unlock the drag header.
+- `/saboton partycooldowns test` - toggle simulated ready, reported, estimated and unknown rows. Simulated data is never transmitted; normal reporting continues if the module is enabled.
+- `/saboton partycooldowns debug` - toggle session-only diagnostics, capped at 120 lines. Output includes preset cooldown state and send results, not raw restricted event values.
+
+**Beta checks:** with two clients, verify out-of-combat and in-combat casts, boss/chat restrictions and delayed recovery, a member without the module, range, party/raid transitions, surnames, death/disconnects, and reload/full relog during a countdown. Verify a secret own cooldown never becomes a fabricated ready report. Only the three presets, a window display and readable-cast/self-report detection are included initially; aura/meter estimates, custom spells, alerts and unit-frame attachments are not yet implemented. Offline mocks do not verify current Forever API behavior or UI layout.
+
+Credit to **42nd Design LLC** and [ForeverCDs](https://www.curseforge.com/wow/addons/forevercds) ([source](https://github.com/42ndDesign/ForeverCDs)) for the group-cooldown idea and hybrid detection logic. The SabotonEssentials module is independently implemented rather than copied from the addon.
 
 ### Squeaky Toy (`squeak`)
 
@@ -18,7 +50,7 @@ When the player gets an extra attack (Windfury, Hand of Justice, Ironfoe, Sword 
 
 ### Chat Tabs (`chattabs`)
 
-On the Chat Tabs settings page, optionally hide each chat window's tab until the cursor is over that window or its tab; this is off by default. You can also hide the chat input box while it is not focused; it appears when you start typing and hides again when focus leaves. Both options are off by default. The **Chat message font** and **Chat message font size** controls affect messages in active chat windows, not tab labels. Font defaults to each window's original font. To change message size, enable **Use custom chat message font size** (off by default) and adjust the slider; turning it off restores each window's original size. The font and size are restored to their pre-override values when disabled during the current session. Previously saved font selections now apply to chat messages, while the size override remains off until enabled.
+On the Chat Tabs settings page, optionally hide each chat window's tab until the cursor is over that window or its tab. You can also hide the chat input box while it is not focused; it appears when you start typing and hides again when focus leaves. **Hide chat buttons** separately hides and disables the standard chat menu, channel, voice, quick join and scrolling controls until turned off. These options are off by default; addon-provided buttons are not included. The **Chat message font** and **Chat message font size** controls affect messages in active chat windows, not tab labels. Font defaults to each window's original font. To change message size, enable **Use custom chat message font size** (off by default) and adjust the slider; turning it off restores each window's size from when the override was enabled. With size override off, changes made in the game remain in effect even if a custom font is selected. Font and size are restored to their pre-override values when disabled during the current session. Previously saved font selections now apply to chat messages, while the size override remains off until enabled.
 
 `/saboton chattabs` toggles tab hiding, `/saboton chattabs enable|disable` sets it explicitly, and `/saboton chattabs status` reports the tab-hiding setting. Use `/saboton chattabs font <default|friz|arial|morpheus|skurri>` and `/saboton chattabs size <8-24|default>` to change message appearance, including when native Settings is unavailable. The feature has had basic in-game testing on Forever; not every chat configuration or addon interaction has been verified.
 
@@ -267,6 +299,7 @@ All commands go through `/saboton <module> <command>`.
 - Spy Enhancement requires Spy for KoS/watch-list access; Spy is an optional load-order dependency so the other modules work without it. Sync uses native messaging and timers, not an incidental Ace library installation.
 - Forever's space-separated guild-message names are normalized to Spy's `First-Surname` identities for self-filtering and peer routing; surnames are never treated as internal realms.
 - `src\Support\GuildSync.lua` handles bounded, paced guild exchanges with provider callbacks. Each frame is at most 255 bytes; native sends are spaced by at least 1.25 seconds, with server-result backoff. Records up to 8,192 bytes use acknowledged continuation chunks; requested records are streamed one at a time. Snapshots are limited to 500 players and 500 guilds. Large reconciliations, particularly with reasons, can take many minutes; restrictions and server throttles can extend that time.
+- `src\Support\PartyCooldowns.lua` owns cooldown state, preset definitions, freshness, validation and wall-clock restoration without UI/network calls. `src\Support\CooldownSync.lua` owns the lightweight full-snapshot group protocol; it is separate from the acknowledged bulk guild-list transport because cooldown state must be regenerated rather than queued as immutable records. `src\Modules\PartyCooldownTracker.lua` connects these helpers to WoW APIs, shared options, timer rows and module persistence. `TimerBars.MakeMovable` accepts an optional separate drag handle.
 - Discovery keeps up to 32 peers, coalesces repeated starts, and shares send opportunities with long transfers. Disconnected peers release their queues on roster updates, or after 3 minutes without progress if no disconnect event arrives. Local combat/chat pauses do not consume that timeout; a remotely restricted peer may need a later manual retry. Imported names survive interruption. This is best-effort per-peer reconciliation, not guaranteed all-to-all convergence in one guild-wide round.
 - Combat and active chat lockdown still pause sync. Forever's broad outgoing-restriction flag is not used as a preflight veto: native send results determine whether submission is allowed, and peer acknowledgments determine success.
 - Sync starts listening only after saved settings are restored. No network queue survives reload; imported-name suppression and confirmed-peer metadata do, subject to the SavedVariables limitation above. The [sync implementation notes](docs/GUILD_SYNC_IMPLEMENTATION.md) document the protocol, bounds, and remaining live checks.
@@ -280,6 +313,8 @@ All commands go through `/saboton <module> <command>`.
 ## Tests
 
 Run all `tests/test_*.lua` files from the addon root with standard Lua 5.1 before a release, as in `.github/workflows/release.yml`. They use mocked WoW APIs and do not replace in-game testing. With Node.js available, an individual suite can also be run with `npx --yes --package fengari-node-cli fengari tests/test_wowhead_link.lua`; Fengari is not a substitute for Lua 5.1 validation. For example, Lua 5.1 rejected a UTF-8 byte-order mark that Fengari accepted.
+
+Party-cooldown tests cover state freshness at the exact 180-second boundary, unknown invalidation, unclamped reports, cast deduplication, restoration as estimates, strict payload validation, pacing/retries, sender/class checks, shared options/persistence, surname ambiguity, restrictions and drag handles. Run `tests/test_party_cooldowns.lua` and `tests/test_party_cooldown_module.lua` alongside the shared timer and persistence suites.
 
 The guild-sync tests simulate multiple clients, restrictions, lost data/ACKs, throttling, concurrent initiators, invalid records, and transfer limits. Run `tests/test_guild_sync.lua` for the transport, `tests/test_guild_sync_recovery.lua` for twenty-client bursts, disconnects/reconnects and exact idle-timeout boundaries, `tests/test_spy_enhancement.lua` for the Spy adapter, and `tests/test_spy_options.lua` for modern/fallback dashboard controls, alongside the persistence/core tests. Basic two-client transfers were confirmed in-game on beta.3; twenty-client load, Forever sender/receiver combat, roster behavior, and visual layout still require in-game validation before release.
 

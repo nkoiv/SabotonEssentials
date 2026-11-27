@@ -3,8 +3,11 @@ local addon = { modules = {}, SaveSettings = noop, Print = function(message) err
 function addon.RegisterModule(key, module) addon.modules[key] = module end
 assert(loadfile("src/Support/Spells.lua"))("SabotonEssentials", addon)
 assert(loadfile("src/Support/TimerBars.lua"))("SabotonEssentials", addon)
+assert(loadfile("src/Support/PartyCooldowns.lua"))("SabotonEssentials", addon)
+assert(loadfile("src/Support/CooldownSync.lua"))("SabotonEssentials", addon)
+C_Spell = { GetSpellName = function(id) return tostring(id) end }
 LOCALIZED_CLASS_NAMES_MALE = {}
-for _, name in ipairs({ "ChatTabs", "ExtraAttack", "GatheringTimer", "MobTimer", "TankTarget", "TankHelper", "SqueakyToy", "SpyEnhancement", "MinimapButton", "WowheadLink" }) do
+for _, name in ipairs({ "ChatTabs", "ExtraAttack", "GatheringTimer", "MobTimer", "PartyCooldownTracker", "TankTarget", "TankHelper", "SqueakyToy", "SpyEnhancement", "MinimapButton", "WowheadLink" }) do
     assert(loadfile("src/Modules/" .. name .. ".lua"))("SabotonEssentials", addon)
 end
 
@@ -76,18 +79,21 @@ function CreateFromMixins() return {} end
 assert(loadfile("src/Options.lua"))("SabotonEssentials", addon)
 addon.modules.options:OnEnable()
 assert(writes == 0, "building the UI must not change any saved preferences")
-assert(table.concat(categoryOrder, ",") == "Chat Tabs,Extra Attack,Gathering Timer,Mob Spawn Timer,Spy Enhancement,Squeaky Toy,Miss Alerts,Tank Target",
+assert(table.concat(categoryOrder, ",") == "Chat Tabs,Extra Attack,Gathering Timer,Mob Spawn Timer,Party Cooldowns (beta),Spy Enhancement,Squeaky Toy,Miss Alerts,Tank Target",
     "module categories must have a stable order")
 assert(not categories["Minimap Button"] and not categories["Wowhead Creature Link"])
 assert(#rootCategory.rows == 2, "general settings belong on the root category")
+assert(controls.SABOTONESSENTIALS_PARTYCOOLDOWNS_ENABLED.data.setting.default == false)
+assert(controls.SABOTONESSENTIALS_PARTYCOOLDOWNS_SHARING.data.setting.default == true)
 assert(controls.SABOTONESSENTIALS_MINIMAP_SHOWBUTTON.data.setting.default == true)
 assert(controls.SABOTONESSENTIALS_WOWHEAD_MENUENABLED.data.setting.default == false)
 assert(controls.SABOTONESSENTIALS_CHATTABS_ENABLED.data.setting.default == false)
 assert(controls.SABOTONESSENTIALS_CHATTABS_HIDEINPUT.data.setting.default == false)
+assert(controls.SABOTONESSENTIALS_CHATTABS_HIDEBUTTONS.data.setting.default == false)
 assert(controls.SABOTONESSENTIALS_CHATTABS_FONT.data.setting.default == "default")
 assert(controls.SABOTONESSENTIALS_CHATTABS_CUSTOMFONTSIZE.data.setting.default == false)
 assert(controls.SABOTONESSENTIALS_CHATTABS_FONTSIZE.data.setting.default == 12)
-assert(#categories["Chat Tabs"].rows == 5, "chat tab options belong on their own settings page")
+assert(#categories["Chat Tabs"].rows == 6, "chat tab options belong on their own settings page")
 controls.SABOTONESSENTIALS_MINIMAP_SHOWBUTTON.data.setting.set(false)
 controls.SABOTONESSENTIALS_WOWHEAD_MENUENABLED.data.setting.set(true)
 controls.SABOTONESSENTIALS_CHATTABS_ENABLED.data.setting.set(true)

@@ -1,5 +1,21 @@
 # Saboton Essentials - Changelog
 
+## [0.8.3] - 2026-11-27
+
+- Preserve game-controlled chat font size changes when a custom font is selected but the size override is off.
+- Add paging and a dedicated options command for Party Cooldowns, and avoid repeated saves when polling unchanged state.
+- Add a schema-driven fallback options window for modules.
+
+## [0.8.2] - 2026-11-27
+
+- Reapply tab visibility when the game or another addon changes a chat tab's opacity while hover hiding is enabled.
+- Add an independent, opt-in Chat Tabs setting to hide the standard chat buttons and scrolling controls.
+- Add an opt-in Party Cooldowns beta module for Innervate, Rebirth and Lay on Hands, with party/raid reporting, a movable window, shared settings and session-only previews.
+- Distinguish readable reports, cast/restored/stale estimates, unknown readiness, and unavailable players. Countdown expiry never confirms readiness; unknown reports clear earlier ready claims.
+- Add bounded, paced class snapshots with restriction/server-result backoff and remaining time recomputed on retry. Preserve running timers across reload as estimates, subject to Forever's SavedVariables limitations.
+- Extend the shared timer drag helper to support a separate window handle.
+- Credit 42nd Design LLC's ForeverCDs for the group-cooldown idea and hybrid detection approach; this implementation is independently written.
+
 ## [0.8.1] - 2026-11-27
 
 - Remove a byte-order mark from Gathering Timer that prevented loading under standard Lua 5.1 and blocked release validation.

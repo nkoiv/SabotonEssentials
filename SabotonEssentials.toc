@@ -1,8 +1,8 @@
 ## Interface: 16001
 ## Title: Saboton Essentials
-## Notes: Chat-tab visibility, extra-attack sounds, gathering timers, tank-target marks, and configurable death sounds.
+## Notes: Party cooldowns, chat-tab visibility, extra-attack sounds, gathering timers, tank-target marks, and configurable death sounds.
 ## Author: nikok
-## Version: 0.8.1
+## Version: 0.8.3
 ## DefaultState: enabled
 ## IconTexture: Interface\Icons\Spell_Frost_FrostNova
 ## SavedVariables: SabotonEssentialsDB
@@ -11,11 +11,14 @@
 src\Core.lua
 src\Support\Spells.lua
 src\Support\TimerBars.lua
+src\Support\PartyCooldowns.lua
+src\Support\CooldownSync.lua
 src\Modules\SqueakyToy.lua
 src\Modules\ExtraAttack.lua
 src\Modules\GatheringTimer.lua
 src\Modules\MobTimer.lua
 src\Modules\MobDeathProbe.lua
+src\Modules\PartyCooldownTracker.lua
 src\Modules\WowheadLink.lua
 src\Modules\ChatTabs.lua
 src\Modules\TankTarget.lua

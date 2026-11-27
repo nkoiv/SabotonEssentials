@@ -74,17 +74,18 @@ function TimerBars.Update(holder, name, duration, elapsed)
     holder.text:SetText(name .. " " .. string.format("%d:%02d", math.floor(remaining / 60), remaining % 60))
 end
 
-function TimerBars.MakeMovable(frame, isLocked, savePosition)
+function TimerBars.MakeMovable(frame, isLocked, savePosition, dragHandle)
+    local handle = dragHandle or frame
     frame:SetMovable(true)
     frame:SetClampedToScreen(true)
-    frame:EnableMouse(not isLocked())
-    frame:RegisterForDrag("LeftButton")
-    frame:SetScript("OnDragStart", function(self)
-        if not isLocked() and not (InCombatLockdown and InCombatLockdown()) then self:StartMoving() end
+    handle:EnableMouse(not isLocked())
+    handle:RegisterForDrag("LeftButton")
+    handle:SetScript("OnDragStart", function()
+        if not isLocked() and not (InCombatLockdown and InCombatLockdown()) then frame:StartMoving() end
     end)
-    frame:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local x, y = self:GetCenter()
+    handle:SetScript("OnDragStop", function()
+        frame:StopMovingOrSizing()
+        local x, y = frame:GetCenter()
         local parentX, parentY = UIParent:GetCenter()
         if x and y and parentX and parentY then savePosition(x - parentX, y - parentY) end
         if addon.SaveSettings then addon.SaveSettings() end

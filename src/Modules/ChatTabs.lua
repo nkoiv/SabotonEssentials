@@ -3,6 +3,7 @@ local _, addon = ...
 local ChatTabs = {}
 local enabled = false
 local hideInput = false
+local hideButtons = false
 local font = "default"
 local customFontSize = false
 local fontSize = 12
@@ -24,7 +25,15 @@ local FONT_PATHS = {
 }
 local originalFonts = {}
 local editBoxStates = {}
+local buttonStates = {}
 local reportedFontErrors = {}
+local CHAT_BUTTONS = {
+    "ChatFrameMenuButton",
+    "ChatFrameChannelButton",
+    "QuickJoinToastButton",
+    "ChatFrameToggleVoiceDeafenButton",
+    "ChatFrameToggleVoiceMuteButton",
+}
 
 local function isMouseOver(frame)
     return frame and frame.IsMouseOver and frame:IsMouseOver()
@@ -64,22 +73,24 @@ local function updateFonts()
             else
                 local currentPath, currentSize, currentFlags = frame:GetFont()
                 if currentPath and currentSize then
-                    local original = originalFonts[frame]
-                    if not original then
-                        original = { path = currentPath, size = currentSize, flags = currentFlags }
-                        originalFonts[frame] = original
+                    local original = originalFonts[frame] or {}
+                    if font ~= "default" and not original.path then original.path = currentPath end
+                    if customFontSize and not original.size then original.size = currentSize end
+                    originalFonts[frame] = original
+                    local path = FONT_PATHS[font] or original.path or currentPath
+                    local size = customFontSize and fontSize or original.size or currentSize
+                    local appliedPath, appliedSize = currentPath, currentSize
+                    if not sameFontPath(currentPath, path) or currentSize ~= size then
+                        frame:SetFont(path, size, currentFlags)
+                        appliedPath, appliedSize = frame:GetFont()
                     end
-                    local path = FONT_PATHS[font] or original.path
-                    local size = customFontSize and fontSize or original.size
-                    if not sameFontPath(currentPath, path) or currentSize ~= size or currentFlags ~= original.flags then
-                        frame:SetFont(path, size, original.flags)
-                        local appliedPath, appliedSize = frame:GetFont()
-                        if not sameFontPath(appliedPath, path) or appliedSize ~= size then
-                            reportFontError("could not apply the selected font or size to chat window " .. index .. ".")
-                        elseif not customizing then
-                            originalFonts[frame] = nil
-                        end
-                    elseif not customizing then
+                    if not sameFontPath(appliedPath, path) or appliedSize ~= size then
+                        reportFontError("could not apply the selected font or size to chat window " .. index .. ".")
+                    else
+                        if font == "default" then original.path = nil end
+                        if not customFontSize then original.size = nil end
+                    end
+                    if not original.path and not original.size then
                         originalFonts[frame] = nil
                     end
                 else
@@ -121,6 +132,54 @@ local function updateEditBoxes()
     end
 end
 
+local function hideButton(frame)
+    if not frame then return end
+    if frame.GetAlpha and frame.SetAlpha then
+        local state = buttonStates[frame]
+        if not state then
+            state = { alpha = frame:GetAlpha() }
+            if frame.IsMouseEnabled and frame.EnableMouse then
+                state.mouseEnabled = frame:IsMouseEnabled()
+            end
+            buttonStates[frame] = state
+        end
+        if frame:GetAlpha() ~= 0 then frame:SetAlpha(0) end
+        if state.mouseEnabled ~= nil and frame:IsMouseEnabled() then
+            frame:EnableMouse(false)
+        end
+    end
+    if frame.GetChildren then
+        for _, child in ipairs({ frame:GetChildren() }) do
+            hideButton(child)
+        end
+    end
+end
+
+local function updateButtons()
+    if not hideButtons then
+        for frame, state in pairs(buttonStates) do
+            frame:SetAlpha(state.alpha)
+            if state.mouseEnabled ~= nil then frame:EnableMouse(state.mouseEnabled) end
+            buttonStates[frame] = nil
+        end
+        return
+    end
+    for _, name in ipairs(CHAT_BUTTONS) do
+        hideButton(_G[name])
+    end
+    local count = tonumber(NUM_CHAT_WINDOWS) or 10
+    for index = 1, count do
+        local frame = _G["ChatFrame" .. index]
+        hideButton(_G["ChatFrame" .. index .. "ButtonFrame"])
+        hideButton(_G["ChatFrame" .. index .. "ScrollBar"])
+        if frame then
+            hideButton(frame.ButtonFrame)
+            hideButton(frame.ScrollBar)
+            hideButton(frame.ScrollToBottomButton)
+        end
+    end
+end
+
 local function updateTabs()
     local count = tonumber(NUM_CHAT_WINDOWS) or 10
     for index = 1, count do
@@ -128,14 +187,16 @@ local function updateTabs()
         local tab = _G["ChatFrame" .. index .. "Tab"]
         if tab and tab.SetAlpha then
             local shown = not enabled or isMouseOver(chatFrame) or isMouseOver(tab)
-            if tab.sabotonChatTabsShown ~= shown then
-                tab:SetAlpha(shown and 1 or 0)
+            local alpha = shown and 1 or 0
+            if tab.sabotonChatTabsShown ~= shown or (enabled and tab.GetAlpha and tab:GetAlpha() ~= alpha) then
+                tab:SetAlpha(alpha)
                 tab.sabotonChatTabsShown = shown
             end
         end
     end
     updateFonts()
     updateEditBoxes()
+    updateButtons()
 end
 
 local function setFont(value)
@@ -221,6 +282,18 @@ function ChatTabs:GetOptionsSchema()
                 default = 12,
                 get = function() return fontSize end,
                 set = setFontSize,
+            },
+            {
+                type = "checkbox",
+                key = "hideButtons",
+                label = "Hide chat buttons",
+                tooltip = "Hide the chat menu, channel, voice, quick join and chat window scrolling buttons.",
+                default = false,
+                get = function() return hideButtons end,
+                set = function(value)
+                    hideButtons = value
+                    updateButtons()
+                end,
             },
         },
     }
