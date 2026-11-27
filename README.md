@@ -279,7 +279,7 @@ All commands go through `/saboton <module> <command>`.
 
 ## Tests
 
-Run the `tests/test_*.lua` files from the addon root with Lua 5.1. They use mocked WoW APIs and do not replace in-game testing. With Node.js available, an individual suite can also be run with `npx --yes --package fengari-node-cli fengari tests/test_wowhead_link.lua`.
+Run all `tests/test_*.lua` files from the addon root with standard Lua 5.1 before a release, as in `.github/workflows/release.yml`. They use mocked WoW APIs and do not replace in-game testing. With Node.js available, an individual suite can also be run with `npx --yes --package fengari-node-cli fengari tests/test_wowhead_link.lua`; Fengari is not a substitute for Lua 5.1 validation. For example, Lua 5.1 rejected a UTF-8 byte-order mark that Fengari accepted.
 
 The guild-sync tests simulate multiple clients, restrictions, lost data/ACKs, throttling, concurrent initiators, invalid records, and transfer limits. Run `tests/test_guild_sync.lua` for the transport, `tests/test_guild_sync_recovery.lua` for twenty-client bursts, disconnects/reconnects and exact idle-timeout boundaries, `tests/test_spy_enhancement.lua` for the Spy adapter, and `tests/test_spy_options.lua` for modern/fallback dashboard controls, alongside the persistence/core tests. Basic two-client transfers were confirmed in-game on beta.3; twenty-client load, Forever sender/receiver combat, roster behavior, and visual layout still require in-game validation before release.
 
@@ -295,13 +295,13 @@ To create a ZIP locally on Windows for manual CurseForge upload, run from the ad
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\package-release.ps1
 ```
 
-The script reads the TOC version and writes `releases\SabotonEssentials-<version>.zip`. The `releases` directory is ignored by Git. It packages the current working files, including uncommitted changes, and refuses to overwrite an existing ZIP; move or remove that ZIP to rebuild the same version. Run the tests and check the addon in-game before uploading.
+The script reads the TOC version and writes `releases\SabotonEssentials-<version>.zip`. The `releases` directory is ignored by Git. It packages the current working files, including uncommitted changes, and refuses to overwrite an existing ZIP. Run the tests and check the addon in-game before uploading. Verify the archive has the expected root folder, matching TOC version and listed files, required media, and linked documentation.
 
 Releases use the [BigWigs WoW Packager](https://github.com/BigWigsMods/packager). It builds a ZIP containing the `SabotonEssentials` addon directory, detects Forever from interface `16001`, and generates release notes from Git history. Tests and original media sources are excluded from the ZIP.
 
-1. Update `## Version` in `SabotonEssentials.toc` and commit the change. The first release is `0.1.0`.
-2. Create and push an annotated tag matching the version, for example `git tag -a v0.1.0 -m "Release 0.1.0"` followed by `git push origin v0.1.0`.
-3. GitHub Actions runs the Lua tests, verifies the archive, and publishes it as a GitHub release and workflow artifact. Tags such as `v0.2.0-beta.1` or `v0.2.0-alpha.1` are marked as prereleases; the TOC version must match without the leading `v`.
+1. Update `## Version` in `SabotonEssentials.toc` and the changelog, run the Lua 5.1 suite, and commit the changes.
+2. Check the current tag, remote, workflow, and intended publishing destinations before creating and pushing an annotated tag matching the TOC version, for example `git tag -a v1.2.3 -m "Release 1.2.3"` followed by `git push origin v1.2.3`. Do not replace a pushed tag without explicit approval; use a new version when appropriate.
+3. GitHub Actions runs the Lua tests, verifies the archive, and publishes it as a GitHub release and workflow artifact. Tags such as `v0.2.0-beta.1` or `v0.2.0-alpha.1` are marked as prereleases; the TOC version must match without the leading `v`. Check the workflow result and the published release and asset rather than assuming a tag push succeeded. When an asset is uploaded manually, compare its digest with the intended ZIP. The workflow's artifact upload must include hidden files because the package is built in `.release`.
 
 For automatic CurseForge uploads, create the WoW addon project on CurseForge, add its numeric project ID as the GitHub Actions repository variable `CURSEFORGE_PROJECT_ID`, and add an [author API token](https://authors.curseforge.com/#/settings/api-tokens) as the repository secret `CF_API_TOKEN`. Both are required if either is configured. Without them the workflow still publishes the ZIP on GitHub, where it can be downloaded and uploaded manually. CurseForge processes and may review uploaded files before publication; check that it lists the intended Forever game version. Re-running a successful CurseForge upload can create a duplicate file.
 
