@@ -1,6 +1,6 @@
 # Saboton Essentials
 
-A modular World of Warcraft Forever addon with combat alerts, gathering and mob timers, tank-target nameplate marks, Spy enhancements, and creature links. Configure it through Options or `/saboton` commands.
+A modular World of Warcraft Forever addon with combat alerts, gathering and mob timers, chat-tab visibility, tank-target nameplate marks, Spy enhancements, and creature links. Configure it through Options or `/saboton` commands.
 
 ## AI disclaimer
 
@@ -15,6 +15,12 @@ When a player of a configurable class (Mage by default) in your party or raid di
 ### Extra Attack (`extraattack`)
 
 When the player gets an extra attack (Windfury, Hand of Justice, Ironfoe, Sword Specialization, etc.), play a sound and track a combo streak on-screen. The combo text arcs rightward on each qualifying hit, then fades after the movement and streak window finish. Its position, movement time, and fade time are adjustable in Options. Detection uses early main-hand `PLAYER_SWING` events as a heuristic for extra attacks and `SPELL_UPDATE_COOLDOWN` for Windfury Totem (one hit per proc; each totem rank uses its own proc spell: 8516, 10608, 10610) and Windfury Weapon (two hits per proc; rank spells 8232, 8235, 10486, 16362, plus proc spell 439440). The optional, experimental "Count Seal of Command procs" setting is off by default and counts a cooldown update for observed proc spell 20424 as one extra attack; seal activation and Judgement spells are ignored. Whether other ranks use the same proc ID on Forever still needs in-game verification. Unusual swing timing may affect the swing-based detection. Multiple hits play a staggered, rising sound cascade after a short settle window. The minimum extra attacks for sound and text is adjustable from 1 to 10 (default 1); only hits in the same burst count toward the threshold. Text appears as soon as the burst qualifies and shows the full combo streak, including hits from smaller bursts. A burst settles after 0.15 seconds without another hit, independently of the combo streak window.
+
+### Chat Tabs (`chattabs`)
+
+On the Chat Tabs settings page, optionally hide each chat window's tab until the cursor is over that window or its tab; this is off by default. You can also hide the chat input box while it is not focused; it appears when you start typing and hides again when focus leaves. Both options are off by default. The **Chat message font** and **Chat message font size** controls affect messages in active chat windows, not tab labels. Font defaults to each window's original font. To change message size, enable **Use custom chat message font size** (off by default) and adjust the slider; turning it off restores each window's original size. The font and size are restored to their pre-override values when disabled during the current session. Previously saved font selections now apply to chat messages, while the size override remains off until enabled.
+
+`/saboton chattabs` toggles tab hiding, `/saboton chattabs enable|disable` sets it explicitly, and `/saboton chattabs status` reports the tab-hiding setting. Use `/saboton chattabs font <default|friz|arial|morpheus|skurri>` and `/saboton chattabs size <8-24|default>` to change message appearance, including when native Settings is unavailable. The feature has had basic in-game testing on Forever; not every chat configuration or addon interaction has been verified.
 
 ### Miss Alerts (`missalerts`) - experimental
 
@@ -137,7 +143,7 @@ For troubleshooting, enable `/saboton spyenhancement debug` on both clients **be
 
 ### Options (`options`)
 
-When Blizzard's Settings API is available, configurable modules use native controls under Game Menu > Options > AddOns > Saboton Essentials. The main Saboton Essentials page contains the minimap button and Wowhead creature-menu toggles; other configurable modules have subpages. Dependent controls gray out when unavailable without losing their saved values. Without that API, `/saboton options` and the minimap button open a smaller panel with these two toggles, Extra Attack text sliders, and launchers for Spy sync, the mob timer, and the Miss Alerts spell manager; use slash commands for other settings.
+When Blizzard's Settings API is available, configurable modules use native controls under Game Menu > Options > AddOns > Saboton Essentials. The main Saboton Essentials page contains the minimap-button and Wowhead creature-menu toggles; configurable modules, including Chat Tabs, have subpages. Dependent controls gray out when unavailable without losing their saved values. Without that API, `/saboton options` and the minimap button open a smaller panel with general toggles, Extra Attack text sliders, and launchers for Spy sync, the mob timer, and the Miss Alerts spell manager; use slash commands for other settings.
 
 Spy Enhancement's Settings subcategory uses native sync, reason-sharing, and notification checkboxes with explanatory tooltips, just like the other modules. **Manage guild sync...** opens a separate live management window; routine **Sync Now** / **Cancel** actions are separated from **Import cleanup**. The window shows live state/list/import counts/requested-name progress, last confirmed exchange, **Remove imported KoS**, and a paged suppressed-name list with **Allow again** and **Allow all**. `/saboton spyenhancement options` or `/saboton options spyenhancement` opens Spy's Settings page. Without Settings support, those commands open the management window with preferences included; the shared fallback options also have a launcher. Allowing names does not immediately import them; run another sync. Progress is per active exchange, not a promise of guild-wide convergence.
 
@@ -153,10 +159,10 @@ The link uses the creature ID from its GUID; it does not import loot data. If a 
 
 ## Installation
 
-Place this folder under the active client's `Interface\AddOns` directory. For the Forever beta, for example:
+Extract the ZIP so the `SabotonEssentials` folder is under the active client's `Interface\AddOns` directory. For Forever, for example:
 
 ```text
-World of Warcraft\_classic_beta_\Interface\AddOns\SabotonEssentials\
+World of Warcraft\_forever_\Interface\AddOns\SabotonEssentials\
 ```
 
 Restart the game or run `/reload`.
@@ -172,6 +178,8 @@ Settings, custom gatherables, and frame positions are stored in the account-wide
 All commands go through `/saboton <module> <command>`.
 
 - `/saboton help` - list available modules
+- `/saboton chattabs` / `enable` / `disable` / `status` - toggle, set, or report chat-tab hover hiding
+- `/saboton chattabs font <default|friz|arial|morpheus|skurri>` / `size <8-24|default>` - change chat message appearance
 - `/saboton wowhead` - show a copyable Wowhead Forever link for the current creature target
 - `/saboton mobtimer options` - open the manual mob-timer editor
 - `/saboton mobprobe start` / `watch` / `status` / `stop` - run the experimental mob-death diagnostic described above

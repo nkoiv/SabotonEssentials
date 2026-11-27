@@ -1,5 +1,33 @@
 # Saboton Essentials - Changelog
 
+## [0.8.0] - 2026-11-27
+
+- Add Chat Tabs settings for opt-in tab hover hiding, hiding the input box when not focused, and choosing the chat message font and size.
+- Add an opt-in Wowhead Forever creature link to target and focus menus, with a slash-command fallback.
+- Move the minimap-button and Wowhead-menu toggles to the main options page; both are available in fallback options.
+- Fix false chat-font errors on Forever and avoid applying message fonts to inactive chat windows.
+
+## [0.7.2-beta.6] - 2026-11-27
+
+- Fix false chat-font errors from Forever's no-return `SetFont` method, and skip inactive chat windows.
+
+## [0.7.2-beta.5] - 2026-11-27
+
+- Apply the font controls to chat messages rather than tab labels. Custom message size is independently opt-in.
+
+## [0.7.2-beta.4] - 2026-11-27
+
+- Fix chat-tab font and size settings on clients whose tab labels are exposed through the tab button.
+
+## [0.7.2-beta.3] - 2026-11-27
+
+- Add a Chat Tabs settings page with opt-in hover hiding and adjustable chat-tab font and size.
+- Add an optional setting to hide chat input boxes when they are not focused.
+
+## [0.7.2-beta.2] - 2026-11-27
+
+- Add a Chat Tabs settings page with opt-in hover hiding and adjustable chat-tab font and size.
+
 ## [0.7.2-beta.1] - 2026-11-27
 
 - Move the minimap button toggle to the main options page and add a Wowhead creature-menu toggle there, off by default. Both are also available in fallback options.
