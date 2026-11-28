@@ -51,6 +51,7 @@ local addon = {
     Print = function() end,
     RegisterModule = function(_, value) module = value end,
 }
+assert(loadfile("src/Support/TimerBars.lua"))("SabotonEssentials", addon)
 assert(loadfile("src/Modules/ExtraAttack.lua"))("SabotonEssentials", addon)
 module:OnEnable()
 local options = module:GetOptionsSchema().options

@@ -271,7 +271,7 @@ end
 function GatheringTimer:SetLocked(value)
     locked = value
     if self.frame then
-        self.frame:EnableMouse(not value)
+        TimerBars.RefreshMovable(self.frame)
         layoutFrame()
     end
 end
@@ -384,7 +384,7 @@ function GatheringTimer:GetOptionsSchema()
           tooltip = "Master switch for loot detection and the timer bars.",
           default = false, get = function() return enabled end, set = function(v) enabled = v end },
         { type = "checkbox", key = "locked", label = "Lock frame position", section = "Appearance",
-          tooltip = "Uncheck to drag the timer bars around with the left mouse button (out of combat).",
+          tooltip = "Alt + left-drag visible bars out of combat even when locked. Uncheck for ordinary dragging and idle placeholders.",
           default = true, get = function() return locked end,
           set = function(v) GatheringTimer:SetLocked(v) end },
         { type = "checkbox", key = "minTimer", label = "Show 'may be up' timer (min)", section = "Respawn timers",

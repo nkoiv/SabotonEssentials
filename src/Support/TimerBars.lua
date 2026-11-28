@@ -74,20 +74,74 @@ function TimerBars.Update(holder, name, duration, elapsed)
     holder.text:SetText(name .. " " .. string.format("%d:%02d", math.floor(remaining / 60), remaining % 60))
 end
 
-function TimerBars.MakeMovable(frame, isLocked, savePosition, dragHandle)
+local movableHandles, modifierFrame = {}, nil
+
+function TimerBars.RefreshMovable(handle)
+    local config = movableHandles[handle]
+    if config then
+        handle:EnableMouse(config.keepMouse or not config.isLocked() or (IsAltKeyDown and IsAltKeyDown()) or config.dragging == true)
+    end
+end
+
+function TimerBars.MakeMovable(frame, isLocked, savePosition, dragHandle, keepMouse)
     local handle = dragHandle or frame
+    local config = { isLocked = isLocked, dragging = false, keepMouse = keepMouse }
+    movableHandles[handle] = config
+    if not modifierFrame then
+        modifierFrame = CreateFrame("Frame")
+        modifierFrame:RegisterEvent("MODIFIER_STATE_CHANGED")
+        modifierFrame:SetScript("OnEvent", function()
+            for registered in pairs(movableHandles) do TimerBars.RefreshMovable(registered) end
+        end)
+    end
     frame:SetMovable(true)
     frame:SetClampedToScreen(true)
-    handle:EnableMouse(not isLocked())
+    TimerBars.RefreshMovable(handle)
     handle:RegisterForDrag("LeftButton")
     handle:SetScript("OnDragStart", function()
-        if not isLocked() and not (InCombatLockdown and InCombatLockdown()) then frame:StartMoving() end
+        if (not isLocked() or (IsAltKeyDown and IsAltKeyDown())) and not (InCombatLockdown and InCombatLockdown()) then
+            config.dragging = true
+            frame:StartMoving()
+        end
     end)
     handle:SetScript("OnDragStop", function()
+        if not config.dragging then return end
+        config.dragging = false
         frame:StopMovingOrSizing()
         local x, y = frame:GetCenter()
         local parentX, parentY = UIParent:GetCenter()
         if x and y and parentX and parentY then savePosition(x - parentX, y - parentY) end
+        TimerBars.RefreshMovable(handle)
         if addon.SaveSettings then addon.SaveSettings() end
     end)
+end
+
+function TimerBars.RefreshTextAnchor(anchor)
+    if not anchor or not anchor:IsShown() or movableHandles[anchor].dragging then return end
+    local x, y = anchor.getPosition()
+    anchor:ClearAllPoints()
+    anchor:SetPoint("CENTER", UIParent, "CENTER", x, y)
+end
+
+function TimerBars.ToggleTextAnchor(anchor, label, getPosition, setPosition)
+    if not anchor then
+        anchor = CreateFrame("Frame", nil, UIParent)
+        anchor:SetSize(260, 42)
+        anchor:SetFrameStrata("DIALOG")
+        local background = anchor:CreateTexture(nil, "BACKGROUND")
+        background:SetAllPoints()
+        background:SetColorTexture(0.1, 0.3, 0.5, 0.9)
+        local text = anchor:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+        text:SetPoint("CENTER")
+        text:SetText(label .. "\nAlt + left-drag (out of combat)")
+        anchor.getPosition = getPosition
+        TimerBars.MakeMovable(anchor, function() return true end, function(x, y)
+            setPosition(x, y)
+            TimerBars.RefreshTextAnchor(anchor)
+        end)
+        anchor:Hide()
+    end
+    if anchor:IsShown() then anchor:Hide()
+    else anchor:Show() TimerBars.RefreshTextAnchor(anchor) end
+    return anchor
 end

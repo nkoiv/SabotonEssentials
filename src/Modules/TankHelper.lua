@@ -403,12 +403,18 @@ function TankHelper:GetOptionsSchema()
                 label = "Alert text horizontal offset", tooltip = "Move the entire arc left or right from screen center.",
                 min = -600, max = 600, step = 10, default = -200, format = "%d",
                 get = function() return textOffsetX end,
-                set = function(value) textOffsetX = math.max(-600, math.min(600, value)) end },
+                set = function(value)
+                    textOffsetX = math.max(-600, math.min(600, value))
+                    addon.TimerBars.RefreshTextAnchor(TankHelper.textAnchor)
+                end },
             { type = "slider", key = "textOffsetY", section = "Alerts", dependsOn = "textEnabled",
                 label = "Alert text vertical offset", tooltip = "Move the entire arc up or down from screen center.",
                 min = -400, max = 400, step = 10, default = 200, format = "%d",
                 get = function() return textOffsetY end,
-                set = function(value) textOffsetY = math.max(-400, math.min(400, value)) end },
+                set = function(value)
+                    textOffsetY = math.max(-400, math.min(400, value))
+                    addon.TimerBars.RefreshTextAnchor(TankHelper.textAnchor)
+                end },
             { type = "slider", key = "textArcDuration", section = "Alerts", dependsOn = "textEnabled",
                 label = "Alert text movement time", tooltip = "Time in seconds to travel along the arc.",
                 min = 0.2, max = 3.0, step = 0.1, default = 0.9, format = "%.1fs",
@@ -438,6 +444,11 @@ function TankHelper:GetOptionsSchema()
             button = "Manage spells...",
             tooltip = "View, add and remove tracked spells and ranks.",
             run = function() TankHelper:ToggleSpellEditor() end,
+        },
+        actions = {
+            { section = "Alerts", label = "Text position", button = "Show / hide text anchor",
+                tooltip = "Alt + left-drag the stationary arc start out of combat. Click again to hide it.",
+                run = function() TankHelper:HandleCommand("move") end },
         },
     }
 end
@@ -538,7 +549,15 @@ end
 function TankHelper:HandleCommand(message)
     local command, rest = (message or ""):match("^%s*(%S*)%s*(.-)%s*$")
     command = command:lower()
-    if command == "start" then
+    if command == "move" then
+        self.textAnchor = addon.TimerBars.ToggleTextAnchor(self.textAnchor, "Miss Alerts text start",
+            function() return textOffsetX, textOffsetY end,
+            function(x, y)
+                textOffsetX = math.max(-600, math.min(600, math.floor(x / 10 + 0.5) * 10))
+                textOffsetY = math.max(-400, math.min(400, math.floor(y / 10 + 0.5) * 10))
+            end)
+        addon.Print("Miss Alerts text anchor " .. (self.textAnchor:IsShown() and "shown; Alt + left-drag out of combat." or "hidden."))
+    elseif command == "start" then
         if running then addon.Print("Miss Alerts probe: already running; stop first to reset.") return end
         startedAt, combatAt, lines = GetTime(), nil, 0
         registered, counts = {}, {}
@@ -584,6 +603,7 @@ function TankHelper:HandleCommand(message)
         else
             value = math.floor(value / 10 + 0.5) * 10
             if command == "xoffset" then textOffsetX = value else textOffsetY = value end
+            addon.TimerBars.RefreshTextAnchor(self.textAnchor)
             addon.Print("Miss Alerts " .. command .. " set to " .. value .. ".")
         end
     elseif command == "movement" or command == "fade" then
@@ -629,7 +649,7 @@ function TankHelper:HandleCommand(message)
             .. "; text: " .. (textEnabled and "on" or "off") .. "; offset: "
             .. textOffsetX .. ", " .. textOffsetY .. "; movement: " .. textArcDuration .. "s; fade: " .. textFadeDuration .. "s.")
     else
-        addon.Print("Miss Alerts: enable, sound, say, soundkey <key>, text, xoffset, yoffset, movement, fade, window, spells, add, remove, test, alertstatus. Probe: start, status, mark, stop.")
+        addon.Print("Miss Alerts: enable, sound, say, soundkey <key>, text, move, xoffset, yoffset, movement, fade, window, spells, add, remove, test, alertstatus. Probe: start, status, mark, stop.")
     end
 end
 

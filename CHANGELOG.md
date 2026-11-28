@@ -1,5 +1,19 @@
 # Saboton Essentials - Changelog
 
+## [0.9.0] - 2026-11-27
+
+- Add a saved Party Cooldowns visibility mode: Party or raid by default, Always, or Raid only. The local preview bypasses this filter, and background sharing remains independent.
+- Expand the verified Forever cooldown catalogue across nine classes, grouped into Utility, Defensive and Offensive options. Fresh installs select only Innervate, Rebirth and Soulstone application for display; existing choices remain intact. Display stays off and sharing on by default.
+- Track Soulstone's application-item cooldown separately from resurrection availability; inaccessible or absent items remain unknown unless a readable cast provides an estimate. Add bounded fallback category pages and verify every class snapshot fits the existing message limit.
+- Keep cooldown row and window heights stable when active effects begin or end by reserving space for effect timers.
+- Verify every tracked rank against Wowhead's Forever tooltip data: Innervate 6 minutes / 20 seconds, Rebirth 30 minutes, Lay on Hands 20 minutes, and Shield Wall 15 minutes / 12 seconds. Preserve readable protection-talented 4-minute Shield Wall cooldown reports rather than guessing talents.
+- Add Shield Wall and show active-effect duration alongside cooldown time in the same row. Readable Shield Wall aura reports preserve talent-adjusted duration; restricted/cast-only timing and Innervate's targeted effect are marked as estimates. Active timing is shared while the display is hidden, expires independently of the cooldown and is not restored after reload.
+- Standardize tracker/timer movement: Alt + left-drag bypasses position locks out of combat without unlocking; ordinary dragging still respects locks. Add stationary Extra Attack / Miss Alerts text-position anchors through commands and modern/fallback Options, preserving saved offsets and animation behavior.
+- Improve Party Cooldowns UX with a visible drag header inside the screen-clamped window, bounded name/status columns, empty-state guidance, page-boundary controls and a position-reset command.
+- Add local-preview buttons to modern/fallback configuration and allow appearance edits while tracking is disabled. Make the fallback configuration window draggable.
+- Separate Party Cooldowns display and sharing: the window is hidden by default, while background cooldown sending/receiving is on by default and independently configurable.
+- Hiding the window preserves cooldown state and sharing. Turning both toggles off cancels polling, unregisters tracking events and clears runtime records/queues. Explicit previews never transmit simulated data.
+
 ## [0.8.3] - 2026-11-27
 
 - Preserve game-controlled chat font size changes when a custom font is selected but the size override is off.
