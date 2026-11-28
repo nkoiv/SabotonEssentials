@@ -62,8 +62,13 @@ Settings = {
     CreateSlider = function(category, setting, sliderOptions)
         return register(category, initializer("slider", { setting = setting, sliderOptions = sliderOptions }))
     end,
-    CreateDropdown = function(category, setting)
-        return register(category, initializer("dropdown", { setting = setting }))
+    CreateDropdown = function(category, setting, options)
+        return register(category, initializer("dropdown", { setting = setting, options = options }))
+    end,
+    CreateControlTextContainer = function()
+        local entries = {}
+        return { Add = function(_, value, label) entries[#entries + 1] = { value, label } end,
+            GetData = function() return entries end }
     end,
     CreateSliderOptions = function()
         return { SetLabelFormatter = function(self, _, formatter) self.formatter = formatter end }
@@ -79,12 +84,35 @@ function CreateFromMixins() return {} end
 assert(loadfile("src/Options.lua"))("SabotonEssentials", addon)
 addon.modules.options:OnEnable()
 assert(writes == 0, "building the UI must not change any saved preferences")
+for _, name in ipairs({ "Extra Attack", "Miss Alerts" }) do
+    local found = false
+    for _, row in ipairs(categories[name].rows) do
+        if row.data.buttonText == "Show / hide text anchor" then found = true end
+    end
+    assert(found, name .. " must provide text positioning in native options")
+end
 assert(table.concat(categoryOrder, ",") == "Chat Tabs,Extra Attack,Gathering Timer,Mob Spawn Timer,Party Cooldowns (beta),Spy Enhancement,Squeaky Toy,Miss Alerts,Tank Target",
     "module categories must have a stable order")
 assert(not categories["Minimap Button"] and not categories["Wowhead Creature Link"])
 assert(#rootCategory.rows == 2, "general settings belong on the root category")
 assert(controls.SABOTONESSENTIALS_PARTYCOOLDOWNS_ENABLED.data.setting.default == false)
 assert(controls.SABOTONESSENTIALS_PARTYCOOLDOWNS_SHARING.data.setting.default == true)
+assert(controls.SABOTONESSENTIALS_PARTYCOOLDOWNS_SHARING:IsEnabled(),
+    "sharing must be independently configurable while display is off")
+local visibilityControl = assert(controls.SABOTONESSENTIALS_PARTYCOOLDOWNS_VISIBILITY)
+assert(visibilityControl.template == "dropdown" and visibilityControl.data.setting.default == "group"
+    and visibilityControl:IsEnabled(), "visibility dropdown must be available while display is off")
+local visibilityChoices = visibilityControl.data.options()
+assert(#visibilityChoices == 3 and visibilityChoices[1][1] == "always" and visibilityChoices[1][2] == "Always"
+    and visibilityChoices[2][1] == "group" and visibilityChoices[2][2] == "Party or raid"
+    and visibilityChoices[3][1] == "raid" and visibilityChoices[3][2] == "Raid only")
+visibilityControl.data.setting.set("raid")
+assert(values.partycooldowns.visibility == "raid")
+for _, spell in ipairs(addon.PartyCooldowns.presets) do
+    local item = assert(controls["SABOTONESSENTIALS_PARTYCOOLDOWNS_" .. spell.key:upper()])
+    assert(item.data.setting.default == (spell.default == true) and item:IsEnabled(),
+        spell.key .. " display setting must be independently configurable while the tracker is hidden")
+end
 assert(controls.SABOTONESSENTIALS_MINIMAP_SHOWBUTTON.data.setting.default == true)
 assert(controls.SABOTONESSENTIALS_WOWHEAD_MENUENABLED.data.setting.default == false)
 assert(controls.SABOTONESSENTIALS_CHATTABS_ENABLED.data.setting.default == false)
@@ -173,5 +201,5 @@ function textControl:DisplayEnabled(enabled) self.labelEnabled = enabled end
 SabotonTextInputControlMixin.EvaluateState(textControl)
 assert(textControl.EditBox.enabled == false and textControl.labelEnabled == false,
     "disabled text controls must disable the actual edit box as well as its label")
-assert(writes == 3, "explicit root-setting changes may write preferences")
+assert(writes == 4, "only explicit setting changes may write preferences")
 print("Shared options layout and dependency tests passed")

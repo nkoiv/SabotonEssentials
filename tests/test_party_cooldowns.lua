@@ -2,8 +2,49 @@ local addon = {}
 assert(loadfile("src/Support/PartyCooldowns.lua"))("SabotonEssentials", addon)
 assert(loadfile("src/Support/CooldownSync.lua"))("SabotonEssentials", addon)
 local T, S = addon.PartyCooldowns, addon.CooldownSync
+local expectedPresets = {
+    innervate = { duration = 360, effectDuration = 20, minLevel = 40, class = "DRUID", ids = { 29166 } },
+    rebirth = { duration = 1800, minLevel = 20, class = "DRUID", ids = { 20484, 20739, 20742, 20747, 20748 } },
+    layonhands = { duration = 1200, minLevel = 10, class = "PALADIN", ids = { 633, 2800, 10310 } },
+    shieldwall = { duration = 900, effectDuration = 12, minLevel = 28, class = "WARRIOR", ids = { 871 } },
+}
+for key, expected in pairs(expectedPresets) do
+    local spell = assert(T.Preset(key))
+    assert(spell.duration == expected.duration and spell.effectDuration == expected.effectDuration,
+        key .. " must match Wowhead Forever's base timing")
+    assert(spell.minLevel == expected.minLevel and spell.class == expected.class)
+    assert(#spell.ids == #expected.ids)
+    for index, id in ipairs(expected.ids) do assert(spell.ids[index] == id) end
+end
+local classEntries, seenKeys, seenIDs, defaults = {}, {}, {}, {}
+for _, spell in ipairs(T.presets) do
+    assert(not seenKeys[spell.key] and not seenIDs[spell.ids[1]], "catalogue keys and primary IDs must be unique")
+    seenKeys[spell.key], seenIDs[spell.ids[1]] = true, true
+    assert(spell.category == "Utility" or spell.category == "Defensive" or spell.category == "Offensive")
+    if spell.default then defaults[spell.key] = true end
+    local entriesForClass = classEntries[spell.class] or {}
+    classEntries[spell.class] = entriesForClass
+    local entry = { id = spell.ids[1], kind = "C", remaining = 7200, duration = 7200 }
+    if spell.effectDuration then
+        entry.effectKind, entry.effectRemaining, entry.effectDuration = "C", 120, 120
+    end
+    entriesForClass[#entriesForClass + 1] = entry
+end
+assert(defaults.innervate and defaults.rebirth and defaults.soulstone)
+local defaultCount = 0
+for _ in pairs(defaults) do defaultCount = defaultCount + 1 end
+assert(defaultCount == 3, "only combat resurrection and Innervate may be selected by default")
+for class, entriesForClass in pairs(classEntries) do
+    local snapshot = assert(S.Encode(entriesForClass), class .. " worst-case snapshot must fit the transport")
+    assert(#snapshot <= 255)
+    local decodedKind, decodedEntries = S.Decode(snapshot)
+    assert(decodedKind == "state" and #decodedEntries == #entriesForClass)
+end
 local tracker = T.New()
 tracker:SetRoster({ druid = { class = "DRUID", level = 60 }, paladin = { class = "PALADIN", level = 60 } })
+assert(tracker:Cast("paladin", "layonhands", T.Preset("layonhands").duration, 0))
+local layState, layLeft = tracker:State("paladin", "layonhands", 60)
+assert(layState == "estimated" and layLeft == 1140, "Lay on Hands cast estimate must count down from 20 minutes")
 assert(tracker:State("druid", "innervate", 0) == "unknown")
 assert(tracker:Write("druid", "innervate", "R", 0, 0, "group report", 0))
 assert(tracker:State("druid", "innervate", 179.99) == "ready")

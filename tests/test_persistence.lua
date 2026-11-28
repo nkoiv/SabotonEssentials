@@ -1,6 +1,9 @@
 local frames, controls, messages, lootName
+local alt = false
+function IsAltKeyDown() return alt end
 local methods = {}
 local function noop() end
+methods.SetWordWrap = noop
 for _, name in ipairs({ "SetSize", "SetFrameStrata", "SetFrameLevel", "SetHighlightTexture", "SetTexture", "SetTexCoord", "RegisterForClicks", "RegisterForDrag", "SetMovable", "SetClampedToScreen", "EnableMouse", "SetAllPoints", "SetMinMaxValues", "SetValue", "SetStatusBarTexture", "SetOrientation", "SetColorTexture", "SetHeight", "SetWidth", "SetAlpha", "SetStatusBarColor", "SetText", "SetDrawLayer", "StartMoving", "StopMovingOrSizing", "SetJustifyH", "SetJustifyV", "SetHitRectInsets", "SetEnabled", "SetChecked" }) do
     methods[name] = noop
 end
@@ -13,6 +16,7 @@ function methods:GetStatusBarTexture() return self end
 function methods:Show() self.shown = true end
 function methods:Hide() self.shown = false end
 function methods:SetShown(value) self.shown = value end
+function methods:IsShown() return self.shown end
 function methods:EnableMouse(value) self.mouseEnabled = value end
 function methods:StartMoving() self.moving = true end
 function methods:SetScript(name, callback) self.scripts[name] = callback end
@@ -121,8 +125,11 @@ assert(ChatFrame1.size == 12 and ChatFrame1.writes == 0,
     "restoring disabled custom size must not change the client's chat font size")
 ChatFrame1 = nil
 
-local addon = session({ version = 1, modules = { minimap = { showButton = false } } })
+local addon = session({ version = 1, modules = { minimap = { showButton = false },
+    partycooldowns = { enabled = false, sharing = false } } })
 assert(not control("MINIMAP", "SHOWBUTTON").get(), "existing minimap preference must restore")
+assert(control("PARTYCOOLDOWNS", "VISIBILITY").get() == "group",
+    "older cooldown settings without a visibility mode must default to party or raid")
 assert(not control("WOWHEAD", "MENUENABLED").get(), "upgrades must default the Wowhead menu off")
 assert(not control("CHATTABS", "ENABLED").get(), "chat-tab hiding must be disabled by default")
 assert(not control("CHATTABS", "HIDEBUTTONS").get(), "chat-button hiding must be disabled by default")
@@ -193,8 +200,42 @@ control("TANKTARGET", "HOSTILEONLY").set(false)
 slash("tanktarget hostile")
 
 local gather = addon.modules.gather.frame
+slash("gather lock")
+alt = true
+fire("MODIFIER_STATE_CHANGED", "LALT", 1)
+assert(gather.mouseEnabled, "locked timer frames must receive Alt dragging")
+gather.scripts.OnDragStart(gather)
+assert(gather.moving)
 gather.x, gather.y = 125, -95
 gather.scripts.OnDragStop(gather)
+assert(control("GATHER", "LOCKED").get(), "Alt movement must not unlock the timer")
+slash("missalerts move")
+local anchor = addon.modules.tankhelper.textAnchor
+assert(anchor:IsShown() and anchor.x == -300 and anchor.y == 200)
+anchor.scripts.OnDragStart(anchor)
+anchor.x, anchor.y = -300, 150
+anchor.scripts.OnDragStop(anchor)
+assert(SabotonEssentialsDB.modules.tankhelper.textOffsetY == 150)
+slash("extraattack move")
+anchor = addon.modules.extraattack.textAnchor
+assert(anchor:IsShown() and anchor.x == 200 and anchor.y == 200)
+anchor.scripts.OnDragStart(anchor)
+anchor.x, anchor.y = 320, -80
+anchor.scripts.OnDragStop(anchor)
+assert(SabotonEssentialsDB.modules.extraattack.textOffsetX == 320)
+assert(SabotonEssentialsDB.modules.extraattack.textOffsetY == -80)
+control("EXTRAATTACK", "TEXTOFFSETX").set(340)
+assert(anchor.x == 340, "sliders must reposition an open anchor")
+slash("extraattack test")
+assert(addon.modules.extraattack.comboDisplay.x == 340 and addon.modules.extraattack.comboDisplay.y == -80,
+    "animation must begin at the newly configured anchor")
+slash("extraattack move")
+assert(not anchor:IsShown())
+slash("missalerts move")
+assert(not addon.modules.tankhelper.textAnchor:IsShown())
+alt = false
+fire("MODIFIER_STATE_CHANGED", "LALT", 0)
+assert(not gather.mouseEnabled)
 local button = addon.modules.minimap.button
 button.scripts.OnDragStart(button)
 button.scripts.OnUpdate(button)
@@ -208,6 +249,10 @@ assert(saved.modules.gather.state.position.x == 125 and saved.modules.gather.sta
 assert(math.abs(saved.modules.minimap.state.angle - 90) < 0.001)
 
 addon = session(saved)
+assert(addon.modules.extraattack.textAnchor == nil and addon.modules.tankhelper.textAnchor == nil,
+    "positioning anchors must not be restored or enable visuals")
+assert(control("EXTRAATTACK", "TEXTOFFSETX").get() == 340 and control("EXTRAATTACK", "TEXTOFFSETY").get() == -80)
+assert(control("TANKHELPER", "TEXTOFFSETY").get() == 150)
 assert(control("TANKHELPER", "FIGHTWINDOW").get() == 120)
 assert(SabotonEssentialsDB.modules.tankhelper.spellList:find("12345", 1, true))
 assert(not control("TANKHELPER", "SOUNDENABLED").get())
@@ -312,6 +357,7 @@ menu["Add current target to mob timer"]()
 assert(SabotonEssentialsDB.modules.mobtimer.state.entries[1].name == "Menu Mob")
 assert(SabotonEssentialsDB.modules.mobtimer.state.entries[1].minSeconds == 600)
 UnitGUID, UnitName = nil, originalUnitName
+addon.modules.mobtimer.frame.scripts.OnDragStart(addon.modules.mobtimer.frame)
 addon.modules.mobtimer.frame.x, addon.modules.mobtimer.frame.y = 42, -80
 addon.modules.mobtimer.frame.scripts.OnDragStop(addon.modules.mobtimer.frame)
 saved = SabotonEssentialsDB

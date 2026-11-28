@@ -512,6 +512,7 @@ function ExtraAttack:GetOptionsSchema()
                 set = function(value)
                     textOffsetX = value
                     positionComboDisplay(ExtraAttack.comboDisplay)
+                    addon.TimerBars.RefreshTextAnchor(ExtraAttack.textAnchor)
                 end,
             },
             {
@@ -525,6 +526,7 @@ function ExtraAttack:GetOptionsSchema()
                 set = function(value)
                     textOffsetY = value
                     positionComboDisplay(ExtraAttack.comboDisplay)
+                    addon.TimerBars.RefreshTextAnchor(ExtraAttack.textAnchor)
                 end,
             },
             {
@@ -547,6 +549,11 @@ function ExtraAttack:GetOptionsSchema()
                 get = function() return textFadeDuration end,
                 set = function(value) textFadeDuration = value end,
             },
+        },
+        action = {
+            section = "Combo text", label = "Text position", button = "Show / hide text anchor",
+            tooltip = "Alt + left-drag the stationary arc start out of combat. Click again to hide it.",
+            run = function() ExtraAttack:HandleCommand("move") end,
         },
     }
 end
@@ -586,7 +593,16 @@ function ExtraAttack:HandleCommand(message)
     local command, rest = string.match(message or "", "^(%S*)%s*(.*)$")
     command = string.lower(command or "")
 
-    if command == "test" then
+    if command == "move" then
+        self.textAnchor = addon.TimerBars.ToggleTextAnchor(self.textAnchor, "Extra Attack text start",
+            function() return textOffsetX, textOffsetY end,
+            function(x, y)
+                textOffsetX = math.max(-600, math.min(600, math.floor(x / 10 + 0.5) * 10))
+                textOffsetY = math.max(-400, math.min(400, math.floor(y / 10 + 0.5) * 10))
+                positionComboDisplay(self.comboDisplay)
+            end)
+        addon.Print("Extra Attack text anchor " .. (self.textAnchor:IsShown() and "shown; Alt + left-drag out of combat." or "hidden."))
+    elseif command == "test" then
         burstHits = burstHits + 1
         handleProc()
     elseif command == "enable" then
@@ -630,6 +646,7 @@ function ExtraAttack:HandleCommand(message)
             value = math.floor(value / 10 + 0.5) * 10
             if command == "xoffset" then textOffsetX = value else textOffsetY = value end
             positionComboDisplay(self.comboDisplay)
+            addon.TimerBars.RefreshTextAnchor(self.textAnchor)
             addon.Print("Combo text " .. command .. " set to " .. value .. ".")
         end
     elseif command == "sound" then
@@ -663,7 +680,7 @@ function ExtraAttack:HandleCommand(message)
     elseif command == "status" then
         printStatus()
     else
-        addon.Print("Commands: /saboton extraattack status, test, enable, debug, window <seconds>, text, textformat <format>, xoffset <number>, yoffset <number>, sound, soundkey <key>, minhits <1-10>, stagger <seconds>")
+        addon.Print("Commands: /saboton extraattack status, test, move, enable, debug, window <seconds>, text, textformat <format>, xoffset <number>, yoffset <number>, sound, soundkey <key>, minhits <1-10>, stagger <seconds>")
     end
 end
 

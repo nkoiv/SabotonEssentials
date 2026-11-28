@@ -6,6 +6,7 @@ local horizontal, vertical = 0, 0
 local movement, fade = 0.9, 0.5
 local mobOpened = false
 local spellOpened = false
+local extraAnchorOpened, missAnchorOpened = false, false
 local minimapShown, wowheadEnabled, chatTabsEnabled, chatInputHidden, chatCustomSize = true, false, false, false, false
 local chatButtonsHidden = false
 local saves = 0
@@ -68,8 +69,12 @@ local addon = {
             { type = "checkbox", label = "Show Wowhead link in creature menus", get = function() return wowheadEnabled end, set = function(v) wowheadEnabled = v end },
         } } end },
         mobtimer = { ToggleEditor = function() mobOpened = true end },
-        tankhelper = { ToggleSpellEditor = function() spellOpened = true end },
+        tankhelper = {
+            ToggleSpellEditor = function() spellOpened = true end,
+            HandleCommand = function(_, command) assert(command == "move") missAnchorOpened = true end,
+        },
         extraattack = {
+            HandleCommand = function(_, command) assert(command == "move") extraAnchorOpened = true end,
             GetOptionsSchema = function()
                 return { options = {
                     { key = "textOffsetX", label = "Horizontal", min = -600, max = 600, step = 10, format = "%d", get = function() return horizontal end, set = function(value) horizontal = value end },
@@ -121,9 +126,12 @@ assert(not minimapShown and wowheadEnabled and not chatTabsEnabled and chatInput
 for _, frame in ipairs(frames) do
     if frame.text == "Mob Spawn Timer: manage mobs" then frame.scripts.OnClick(frame) end
     if frame.text == "Miss Alerts: manage spells" then frame.scripts.OnClick(frame) end
+    if frame.text == "Extra Attack: position text" then frame.scripts.OnClick(frame) end
+    if frame.text == "Miss Alerts: position text" then frame.scripts.OnClick(frame) end
 end
 assert(mobOpened, "fallback options must open the mob editor")
 assert(spellOpened, "fallback options must open the spell editor")
+assert(extraAnchorOpened and missAnchorOpened, "fallback options must provide both text-positioning anchors")
 sliders[1]:SetValue(200)
 sliders[2]:SetValue(-100)
 assert(horizontal == 200 and vertical == -100)

@@ -240,7 +240,7 @@ end
 function MobTimer:SetLocked(value)
     locked = value
     if self.frame then
-        self.frame:EnableMouse(not value)
+        bars.RefreshMovable(self.frame)
         render()
     end
 end
@@ -263,6 +263,7 @@ function MobTimer:GetOptionsSchema()
                     if not v then observed = {} else lastScan = -1 end
                 end },
             { type = "checkbox", key = "locked", label = "Lock frame position", section = "Appearance", default = true,
+                tooltip = "Alt + left-drag visible bars out of combat even when locked. Uncheck for ordinary dragging and idle placeholders.",
                 get = function() return locked end, set = function(v) MobTimer:SetLocked(v) end },
             { type = "slider", key = "width", label = "Bar width", section = "Appearance", min = 60, max = 500, step = 5, default = 220, format = "%dpx",
                 get = function() return width end, set = function(v) if type(v) == "number" and v >= 60 and v <= 500 then width = v render() else addon.Print("Invalid mob timer width.") end end },

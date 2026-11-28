@@ -14,7 +14,7 @@ end
 
 function Sync.Encode(entries)
     if type(entries) ~= "table" or #entries > #addon.PartyCooldowns.presets then return nil end
-    local parts, seen = {}, {}
+    local parts, seen, extended = {}, {}, false
     for _, entry in ipairs(entries) do
         local spell = addon.PartyCooldowns.Preset(entry.id)
         if not spell or seen[entry.id] then return nil end
@@ -25,9 +25,20 @@ function Sync.Encode(entries)
             if entry.remaining == 0 or entry.remaining > entry.duration then return nil end
         elseif (entry.kind ~= "R" and entry.kind ~= "U" and entry.kind ~= "N")
             or entry.remaining ~= 0 or entry.duration ~= 0 then return nil end
-        parts[#parts + 1] = table.concat({ entry.id, entry.kind, entry.remaining, entry.duration }, ":")
+        local part = table.concat({ entry.id, entry.kind, entry.remaining, entry.duration }, ":")
+        if entry.effectKind ~= nil then
+            if not spell.effectDuration or not integer(entry.effectRemaining, 120) or not integer(entry.effectDuration, 120) then return nil end
+            local effectActive = entry.effectKind == "C" or entry.effectKind == "E"
+            if effectActive then
+                if entry.effectRemaining == 0 or entry.effectRemaining > entry.effectDuration then return nil end
+            elseif (entry.effectKind ~= "R" and entry.effectKind ~= "U")
+                or entry.effectRemaining ~= 0 or entry.effectDuration ~= 0 then return nil end
+            part = part .. ":" .. table.concat({ entry.effectKind, entry.effectRemaining, entry.effectDuration }, ":")
+            extended = true
+        elseif entry.effectRemaining ~= nil or entry.effectDuration ~= nil then return nil end
+        parts[#parts + 1] = part
     end
-    local packet = "S|1|" .. table.concat(parts, ",")
+    local packet = (extended and "S|2|" or "S|1|") .. table.concat(parts, ",")
     if #packet > 255 then return nil end
     return packet
 end
@@ -35,14 +46,25 @@ end
 function Sync.Decode(packet)
     if secret(packet) or type(packet) ~= "string" or #packet > 255 then return nil end
     if packet == "R|1" then return "request" end
-    local body = packet:match("^S|1|(.*)$")
+    local version, body = packet:match("^S|([12])|(.*)$")
     if not body then return nil end
-    if body == "" then return "state", {} end
+    if body == "" then if version == "1" then return "state", {} end return nil end
     local entries = {}
     for part in (body .. ","):gmatch("(.-),") do
-        local id, kind, remaining, duration = part:match("^(%d+):([RCEUN]):(%d+):(%d+)$")
+        local id, kind, remaining, duration, effectKind, effectRemaining, effectDuration
+        if version == "2" then
+            id, kind, remaining, duration, effectKind, effectRemaining, effectDuration =
+                part:match("^(%d+):([RCEUN]):(%d+):(%d+):([RCEU]):(%d+):(%d+)$")
+        end
+        if not id then id, kind, remaining, duration = part:match("^(%d+):([RCEUN]):(%d+):(%d+)$") end
         if not id or #id > 6 or #remaining > 4 or #duration > 4 then return nil end
         entries[#entries + 1] = { id = tonumber(id), kind = kind, remaining = tonumber(remaining), duration = tonumber(duration) }
+        if effectKind then
+            if #effectRemaining > 3 or #effectDuration > 3 then return nil end
+            entries[#entries].effectKind = effectKind
+            entries[#entries].effectRemaining = tonumber(effectRemaining)
+            entries[#entries].effectDuration = tonumber(effectDuration)
+        end
     end
     if Sync.Encode(entries) ~= packet then return nil end
     return "state", entries

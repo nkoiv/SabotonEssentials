@@ -260,6 +260,13 @@ function Options:ToggleSpyDashboard()
     if self.spyWindow:IsShown() then self.spyWindow:Hide() else self.spyWindow:Show() end
 end
 
+local function schemaActions(schema)
+    local actions = {}
+    if schema.action then actions[#actions + 1] = schema.action end
+    for _, action in ipairs(schema.actions or {}) do actions[#actions + 1] = action end
+    return actions
+end
+
 local function createSchemaWindow(schema)
     local panel = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
     panel:SetPoint("CENTER")
@@ -272,12 +279,42 @@ local function createSchemaWindow(schema)
     local title = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
     title:SetPoint("TOP", 0, -20)
     title:SetText(schema.name)
+    local handle = CreateFrame("Frame", nil, panel)
+    handle:SetHeight(35)
+    handle:SetPoint("TOPLEFT", panel, "TOPLEFT", 10, -5)
+    handle:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -35, -5)
+    addon.TimerBars.MakeMovable(panel, function() return false end, function() end, handle)
     local close = CreateFrame("Button", nil, panel, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", -4, -4)
     local controls, specs, y = {}, {}, 55
+    local sections, sectionIndex = { "General", "Utility", "Defensive", "Offensive" }, 1
+    local sectionY = { General = 85, Utility = 85, Defensive = 85, Offensive = 85 }
+    local sectionLabel, previous, nextButton
+    if schema.fallbackSections then
+        previous = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        previous:SetSize(28, 22)
+        previous:SetPoint("TOPLEFT", 25, -50)
+        nextButton = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        nextButton:SetSize(28, 22)
+        nextButton:SetPoint("TOPRIGHT", -25, -50)
+        previous:SetText("<")
+        nextButton:SetText(">")
+        sectionLabel = panel:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+        sectionLabel:SetPoint("TOP", 0, -55)
+        previous:SetScript("OnClick", function()
+            sectionIndex = math.max(1, sectionIndex - 1)
+            panel:Refresh()
+        end)
+        nextButton:SetScript("OnClick", function()
+            sectionIndex = math.min(#sections, sectionIndex + 1)
+            panel:Refresh()
+        end)
+    end
     for _, spec in ipairs(schema.options or {}) do specs[spec.key] = spec end
     for _, spec in ipairs(schema.options or {}) do
         if not spec.hidden then
+            local section = (spec.section == "Appearance" and "General" or spec.section)
+            if schema.fallbackSections then y = assert(sectionY[section], "unknown fallback section") end
             local control, label
             if spec.type == "checkbox" then
                 control = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
@@ -291,6 +328,24 @@ local function createSchemaWindow(schema)
                     panel:Refresh()
                 end)
                 y = y + 30
+            elseif spec.type == "dropdown" then
+                label = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+                label:SetPoint("TOPLEFT", 30, -y)
+                control = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+                control:SetSize(340, 24)
+                control:SetPoint("TOPLEFT", 30, -y - 22)
+                control:SetScript("OnClick", function()
+                    local choices = type(spec.choices) == "function" and spec.choices() or spec.choices
+                    for index, choice in ipairs(choices) do
+                        if choice.value == spec.get() then
+                            saveOption(spec, choices[index % #choices + 1].value)
+                            panel:Refresh()
+                            return
+                        end
+                    end
+                    addon.Print("Fallback options: current selection is invalid for " .. spec.label .. ".")
+                end)
+                y = y + 56
             elseif spec.type == "slider" then
                 label = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
                 label:SetPoint("TOPLEFT", 30, -y)
@@ -316,23 +371,56 @@ local function createSchemaWindow(schema)
             end
             if control then
                 tooltip(control, spec.tooltip or spec.label)
-                controls[#controls + 1] = { control = control, label = label, spec = spec }
+                controls[#controls + 1] = { control = control, label = label, spec = spec, section = section }
             end
+            if schema.fallbackSections then sectionY[section] = y end
         end
+    end
+    if schema.fallbackSections then y = sectionY.General end
+    local actions = {}
+    for _, spec in ipairs(schemaActions(schema)) do
+        local action = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+        action:SetSize(340, 24)
+        action:SetPoint("TOPLEFT", 30, -y)
+        action:SetText(spec.button)
+        tooltip(action, spec.tooltip or spec.label)
+        action:SetScript("OnClick", function() spec.run() panel:Refresh() end)
+        actions[#actions + 1] = action
+        y = y + 34
+    end
+    if schema.fallbackSections then
+        for _, endY in pairs(sectionY) do y = math.max(y, endY) end
     end
     panel:SetSize(410, y + 25)
     function panel:Refresh()
         self.refreshing = true
         for _, entry in ipairs(controls) do
             local spec, control = entry.spec, entry.control
-            local master = not schema.enabledKey or spec.key == schema.enabledKey or specs[schema.enabledKey].get()
+            if schema.fallbackSections then
+                local visible = entry.section == sections[sectionIndex]
+                control:SetShown(visible)
+                if entry.label then entry.label:SetShown(visible) end
+            end
+            local master = spec.allowWhenDisabled or not schema.enabledKey or spec.key == schema.enabledKey or specs[schema.enabledKey].get()
             control:SetEnabled(master and (not spec.dependsOn or specs[spec.dependsOn].get()))
             if spec.type == "checkbox" then control:SetChecked(spec.get())
+            elseif spec.type == "dropdown" then
+                local choices = type(spec.choices) == "function" and spec.choices() or spec.choices
+                local selected
+                for _, choice in ipairs(choices) do if choice.value == spec.get() then selected = choice.label break end end
+                control:SetText(selected or "Invalid selection")
+                entry.label:SetText(spec.label .. " (click to change)")
             else
                 control:SetValue(spec.get())
                 entry.label:SetText(spec.label .. ": " .. (spec.formatValue and spec.formatValue(spec.get())
                     or string.format(spec.format or "%d", spec.get())))
             end
+        end
+        if schema.fallbackSections then
+            sectionLabel:SetText(sections[sectionIndex] .. " (" .. sectionIndex .. "/" .. #sections .. ")")
+            previous:SetEnabled(sectionIndex > 1)
+            nextButton:SetEnabled(sectionIndex < #sections)
+            for _, action in ipairs(actions) do action:SetShown(sectionIndex == 1) end
         end
         self.refreshing = false
     end
@@ -345,6 +433,7 @@ local function createFallbackPanel()
     local panel = CreateFrame("Frame", nil, UIParent, "BackdropTemplate")
     local launchers = (addon.modules.spyenhancement and 1 or 0) + (addon.modules.mobtimer and 1 or 0)
         + (addon.modules.tankhelper and 1 or 0) + (addon.modules.partycooldowns and 1 or 0)
+    local anchorLaunchers = (addon.modules.extraattack and 1 or 0) + (addon.modules.tankhelper and 1 or 0)
     local general = {}
     for _, key in ipairs({ "chattabs", "minimap", "wowhead" }) do
         local module = addon.modules[key]
@@ -355,7 +444,7 @@ local function createFallbackPanel()
         end
     end
     local generalHeight = #general * 28
-    panel:SetSize(360, 290 + launchers * 45 + generalHeight)
+    panel:SetSize(360, 290 + (launchers + anchorLaunchers) * 45 + generalHeight)
     panel:SetPoint("CENTER")
     panel:SetFrameStrata("DIALOG")
     panel:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", edgeSize = 24, insets = { left = 6, right = 6, top = 6, bottom = 6 } })
@@ -445,6 +534,19 @@ local function createFallbackPanel()
         cooldowns:SetPoint("BOTTOM", 0, 24 + offset)
         cooldowns:SetText("Party Cooldowns: options")
         cooldowns:SetScript("OnClick", function() Options:HandleCommand("partycooldowns") end)
+    end
+    local anchorRow = 0
+    for _, key in ipairs({ "extraattack", "tankhelper" }) do
+        local module = addon.modules[key]
+        if module then
+            local button = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
+            button:SetSize(290, 24)
+            button:SetPoint("BOTTOM", 0, 24 + (launchers + anchorRow) * 32)
+            button:SetText((key == "extraattack" and "Extra Attack" or "Miss Alerts") .. ": position text")
+            tooltip(button, "Show / hide a stationary text anchor. Alt + left-drag out of combat.")
+            button:SetScript("OnClick", function() module:HandleCommand("move") end)
+            anchorRow = anchorRow + 1
+        end
     end
     panel:SetScript("OnShow", function()
         for _, refresh in ipairs(refreshers) do refresh() end
@@ -537,21 +639,25 @@ local function buildModulePanel(rootCategory, moduleKey, schema)
                         -- This native hook watches proxy-setting variables as well as CVars.
                         initializer:AddEvaluateStateCVar(toVariableKey(moduleKey, key))
                     end
-                    if schema.enabledKey and spec.key ~= schema.enabledKey then
+                    if schema.enabledKey and spec.key ~= schema.enabledKey and not spec.allowWhenDisabled then
                         requireOption(schema.enabledKey)
                     end
                     if spec.dependsOn then requireOption(spec.dependsOn) end
                 end
             end
         end
-        if schema.action and schema.action.section == section then
-            Settings.RegisterInitializer(subcategory, CreateSettingsButtonInitializer(
-                schema.action.label, schema.action.button, schema.action.run, schema.action.tooltip, true))
+        for _, action in ipairs(schemaActions(schema)) do
+            if action.section == section then
+                Settings.RegisterInitializer(subcategory, CreateSettingsButtonInitializer(
+                    action.label, action.button, action.run, action.tooltip, true))
+            end
         end
     end
-    if schema.action and not schema.action.section then
-        Settings.RegisterInitializer(subcategory, CreateSettingsButtonInitializer(
-            schema.action.label, schema.action.button, schema.action.run, schema.action.tooltip, true))
+    for _, action in ipairs(schemaActions(schema)) do
+        if not action.section then
+            Settings.RegisterInitializer(subcategory, CreateSettingsButtonInitializer(
+                action.label, action.button, action.run, action.tooltip, true))
+        end
     end
     if schema.dashboard then
         Settings.RegisterInitializer(subcategory, CreateSettingsButtonInitializer(
